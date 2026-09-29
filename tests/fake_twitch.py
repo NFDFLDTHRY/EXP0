@@ -1,4 +1,4 @@
-"""TEST-ONLY fake Twitch (id + Helix + EventSub WebSocket), fake GitHack host and LM Studio.
+"""TEST-ONLY fake Twitch (id + Helix + EventSub WebSocket), fake GitHack host and LiteRT-LM API.
 
 Never used by the product. One aiohttp app served twice:
   http://127.0.0.1:<plain>   for the controller (EXP0_TWITCH_* environment overrides)
@@ -40,8 +40,8 @@ def iso() -> str:
 
 
 class FakeTwitch:
-    def __init__(self, static_root: Path, plain_port: int, tls_port: int, lm_port: int, cert: Path, key: Path):
-        self.static_root, self.plain_port, self.tls_port, self.lm_port = static_root, plain_port, tls_port, lm_port
+    def __init__(self, static_root: Path, plain_port: int, tls_port: int, model_port: int, cert: Path, key: Path):
+        self.static_root, self.plain_port, self.tls_port, self.model_port = static_root, plain_port, tls_port, model_port
         self.cert, self.key = cert, key
         self.tokens = {k: dict(v, valid=True) for k, v in TOKENS.items()}
         # There is exactly one OAuth surface in the V2 product: ally.html.
@@ -52,11 +52,12 @@ class FakeTwitch:
         self.chat_sent: list = []
         self.delivered: list = []
         self.authorize_requests: list = []
-        self.lm_models = ["gemma-4-e4b-it"]
-        self.lm_requests: list = []
-        self.lm_responses: list = []
-        self.lm_delay_s = 0.0
-        self.lm_runner = None
+        self.model_ids = ["gemma-4-e4b-it"]
+        self.model_requests: list = []
+        self.model_responses: list = []
+        self.model_health_response = None
+        self.model_delay_s = 0.0
+        self.model_runner = None
         self.loop = None
         self.ready = threading.Event()
 
@@ -92,7 +93,7 @@ class FakeTwitch:
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ctx.load_cert_chain(str(self.cert), str(self.key))
         await web.TCPSite(runner, "127.0.0.1", self.tls_port, ssl_context=ctx).start()
-        await self._lm_start()
+        await self._model_start()
 
     def call(self, coro_or_fn, *args):
         async def run():
@@ -311,21 +312,26 @@ class FakeTwitch:
         if sess:
             await self._send(sess, entry["msg"])
 
-    # ---------------------------------------------------------------- fake LM Studio (127.0.0.1 only)
-    async def _lm_start(self) -> None:
+    # ---------------------------------------------------------------- fake LiteRT-LM OpenAI-compatible API (127.0.0.1 only)
+    async def _model_start(self) -> None:
         app = web.Application()
 
         async def models(_request):
-            return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "organization_owner"} for m in self.lm_models]})
+            return web.json_response({"object": "list", "data": [{"id": m, "object": "model"} for m in self.model_ids]})
         async def completions(request):
             body = await request.json()
-            self.lm_requests.append(body)
-            delay = self.lm_delay_s
+            self.model_requests.append(body)
+            if body.get("response_format") != {"type": "json_object"}:
+                return web.json_response({"error": "expected JSON object response format"}, status=400)
+            delay = self.model_delay_s
             if delay:
                 await asyncio.sleep(delay)
-            if self.lm_responses:
-                proposed = self.lm_responses.pop(0)
-            elif (body.get("messages") or [{}])[0].get("content", "").startswith("You narrate"):
+            system = (body.get("messages") or [{}])[0].get("content", "")
+            if system.startswith("EXP0 model health check."):
+                proposed = self.model_health_response if self.model_health_response is not None else {"ok": True}
+            elif self.model_responses:
+                proposed = self.model_responses.pop(0)
+            elif system.startswith("You narrate"):
                 observation = json.loads(body["messages"][1]["content"])
                 proposed = {"narration": observation["summary"] + " The air holds its breath."}
             else:
@@ -340,15 +346,15 @@ class FakeTwitch:
                                       "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70}})
         app.router.add_get("/v1/models", models)
         app.router.add_post("/v1/chat/completions", completions)
-        self.lm_runner = web.AppRunner(app)
-        await self.lm_runner.setup()
-        await web.TCPSite(self.lm_runner, "127.0.0.1", self.lm_port).start()
+        self.model_runner = web.AppRunner(app)
+        await self.model_runner.setup()
+        await web.TCPSite(self.model_runner, "127.0.0.1", self.model_port).start()
 
-    async def lm_stop(self) -> None:
-        if self.lm_runner:
-            await self.lm_runner.cleanup()
-            self.lm_runner = None
+    async def model_stop(self) -> None:
+        if self.model_runner:
+            await self.model_runner.cleanup()
+            self.model_runner = None
 
-    async def lm_restart(self) -> None:
-        if not self.lm_runner:
-            await self._lm_start()
+    async def model_restart(self) -> None:
+        if not self.model_runner:
+            await self._model_start()

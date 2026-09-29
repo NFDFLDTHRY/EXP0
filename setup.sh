@@ -65,7 +65,7 @@ if [ -z "$ROLE" ]; then
     ROLE=all-in-one
   else
     echo "Choose a role for this machine:"
-    echo "  1) all-in-one  Debian runs everything: controller, Twitch edge, LM Studio/Gemma  (built)"
+    echo "  1) all-in-one  Debian runs everything: controller, Twitch edge, LiteRT-LM/Gemma  (built)"
     echo "  2) core        Debian runs canonical state + Gemma; a Termux phone runs the Twitch edge  (not built yet)"
     printf 'role [1]: '
     read -r ans || ans=""
@@ -127,4 +127,4 @@ ok "generated ./exp0 (start | stop | restart | status | logs | doctor)"
 echo
 echo "Next:"
 echo "  ./exp0 start     starts the controller on 127.0.0.1 and prints your ally.html link"
-echo "  ./exp0 doctor    checks Twitch reachability, LM Studio, and that nothing listens on the network"
+echo "  ./exp0 doctor    checks Twitch reachability, local Gemma service, and that nothing listens on the network"

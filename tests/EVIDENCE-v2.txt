@@ -2,15 +2,15 @@ EXP0 V2 local integration evidence
 =================================
 
 Harness: python3 tests/e2e_v2.py
-Observed: 2026-09-29 UTC, 61 checks PASS, 0 FAIL, exit 0.
-History: 184 append-only, gapless NDJSON records across a controller restart.
+Observed: 2026-09-29 UTC, 68 checks PASS, 0 FAIL, exit 0.
+History: 186 append-only, gapless NDJSON records across a controller restart.
 
 Method
 ------
 - A fresh copy runs real setup.sh and the generated exp0 lifecycle commands.
 - The controller runs as a separate process on 127.0.0.1.
 - tests/fake_twitch.py serves fake Twitch identity, Helix and EventSub WebSocket,
-  and fake LM Studio /v1/models and /v1/chat/completions.
+  and fake LiteRT-LM /v1/models and /v1/chat/completions.
 - EventSub deliveries use channel.chat.message; tests replay the same chat ID.
 - Persistence is inspected in var/ across ./exp0 restart.
 - ally.html and village.html are statically checked. No browser automation runs here.
@@ -21,8 +21,15 @@ Observed checkpoints
   source. Only the operator's fake OAuth token was accepted. Controller required
   user:read:chat and user:write:chat, and subscribed only to BigRigJay's numeric
   broadcaster ID with the operator's numeric user ID. No whispers were used.
-  ./exp0 doctor verified the local controller, fake EventSub welcome and model
-  discovery. Its GitHack reachability check warned on this network restriction.
+  ./exp0 doctor verified the local controller, fake EventSub welcome, model
+  discovery and a fake JSON health completion. Its GitHack reachability check
+  warned on this network restriction.
+- A simulated existing config with the old lmstudio_url key was migrated to
+  model_url at 127.0.0.1:1234. The legacy key was removed and stayed absent
+  after restart. The model probe checked both discovery and a short completion;
+  a listed model with a broken completion was not reported ready, and readiness
+  recovered after a valid completion. Fake requests used JSON object response
+  format and LiteRT-LM's max_completion_tokens field for health and game turns.
 - BigRigJay's numeric chat ID 123456 triggered !help and one !do scout north
   commander turn. Fake Gemma received the legal public world projection, bounded
   viewer council input, and operator advice; it received no private state keys.
@@ -47,7 +54,7 @@ Observed checkpoints
   token. After reauthorization, the old chat message ID remained deduplicated;
   !status described the persisted day. No test OAuth token appeared in any
   runtime var/ file after stop.
-- A controlled two-second fake LM response paused a commander turn. The test
+- A controlled two-second fake model response paused a commander turn. The test
   disconnected EventSub while the model call was in flight; the world stayed
   unchanged and the intent remained pending. Reconnecting EventSub resumed
   that intent and committed exactly once.
@@ -57,7 +64,8 @@ Proof boundary
 Every passing harness check is SIMULATED transport and model evidence. It tests
 the real controller process, file persistence and HTTP/WebSocket code paths
 against fake external services. This environment has no live Twitch account,
-live Twitch channel, Chromium browser, or LM Studio/Gemma session. Browser OAuth,
+live Twitch channel, Chromium browser, or LiteRT-LM/Gemma session. Browser OAuth,
 GitHack to loopback browser policy, real EventSub delivery, real Twitch chat
-send, and actual Gemma behavior remain PENDING-REAL. See GATES.md for the short
-operator proof sequence.
+send, and actual Gemma behavior on the 8 GB Debian laptop remain PENDING-REAL.
+Google's currently documented LiteRT-LM Gemma 4 route supports E2B/E4B; it does
+not promise the 26B A4B variant. See GATES.md for the operator proof sequence.

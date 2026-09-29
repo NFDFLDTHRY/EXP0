@@ -1,5 +1,6 @@
 var/
 /exp0
+.venv/
 __pycache__/
 *.pyc
 tests/.run/

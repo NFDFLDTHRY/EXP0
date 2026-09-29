@@ -80,7 +80,7 @@
     <span class="pill" id="pTw">twitch</span>
     <span class="pill" id="pEdge">edge</span>
     <span class="pill" id="pGame">world</span>
-    <span class="pill" id="pLm">lm studio</span>
+    <span class="pill" id="pLm">local Gemma</span>
     <span class="pill" id="pEstop">e-stop off</span>
   </div>
   <p class="sub">User + Gemma 4 side of EXP0. This page holds two authorities that never mix:
@@ -168,10 +168,10 @@
     </section>
 
     <section>
-      <h3>LM STUDIO &middot; Gemma host <span class="badge" id="bLm"></span></h3>
+      <h3>LOCAL GEMMA &middot; Google LiteRT-LM <span class="badge" id="bLm"></span></h3>
       <div class="kv"><div>url</div><div id="lmUrl">&mdash;</div><div>models</div><div id="lmModels">&mdash;</div></div>
-      <div class="row"><button id="bLm1" class="primary">Check LM Studio</button></div>
-      <p class="note">Must stay on this machine: in LM Studio keep "Serve on Local Network" off. Start its server from the Developer tab or with <code>lms server start</code>. <code>./exp0 doctor</code> checks that it is not reachable from the network.</p>
+      <div class="row"><button id="bLm1" class="primary">Check local Gemma</button></div>
+      <p class="note">In a separate terminal, import <code>gemma4-e4b</code> as described in README.md, then run <code>.venv/bin/litert-lm serve --host 127.0.0.1 --port 1234</code> from the repo. Specify <code>--host 127.0.0.1</code> each time to keep the model service local. The check asks it for a short completion as well as a model list.</p>
     </section>
 
     <section>
@@ -397,12 +397,13 @@ function render() {
   const council = (s.recent_council || []).slice(-5).reverse();
   $('councilBody').innerHTML = '<p>Pending private advice: ' + esc(s.advice_count == null ? 0 : s.advice_count) + '. Recent chat council:</p>' +
     (council.length ? '<table><tbody>' + council.map(m => '<tr><td>' + esc(m.chatter || '') + '</td><td>' + esc(m.text || '') + '</td></tr>').join('') + '</tbody></table>' : '<p>No viewer suggestions yet.</p>');
-  // lm studio
-  const lm = s.lmstudio;
-  $('lmUrl').textContent = c.lmstudio_url;
-  $('lmModels').textContent = lm ? (lm.reachable ? (lm.models.join(', ') || '(server up, no model loaded)') : 'unreachable: ' + lm.error) : 'not checked yet';
-  badge('bLm', lm ? (lm.reachable ? 'reachable' : 'unreachable') : 'not checked', lm ? (lm.reachable ? 'ok' : 'bad') : '');
-  pill('pLm', lm ? (lm.reachable ? 'lm studio up' : 'lm studio down') : 'lm studio ?', lm ? (lm.reachable ? 'ok' : 'bad') : '');
+  // local Gemma service: listing models alone does not prove inference can run
+  const model = s.model;
+  $('lmUrl').textContent = c.model_url || 'http://127.0.0.1:1234';
+  $('lmModels').textContent = model ? (model.reachable ? ((model.models || []).join(', ') || '(server up, no model imported)') +
+    (model.completion_ok === true ? ' · short completion passed' : (model.completion_ok === false ? ' · completion failed: ' + (model.completion_error || model.error || 'see history') : ' · run check for completion')) : 'unreachable: ' + model.error) : 'not checked yet';
+  badge('bLm', model ? (model.completion_ok === true ? 'inference ready' : (model.reachable ? 'reachable; check inference' : 'unreachable')) : 'not checked', model ? (model.completion_ok === true ? 'ok' : (model.reachable ? 'warn' : 'bad')) : '');
+  pill('pLm', model ? (model.completion_ok === true ? 'Gemma ready' : (model.reachable ? 'Gemma reachable' : 'Gemma down')) : 'local Gemma ?', model ? (model.completion_ok === true ? 'ok' : (model.reachable ? 'warn' : 'bad')) : '');
   // e-stop
   pill('pEstop', s.estop ? 'E-STOP' : 'e-stop off', s.estop ? 'bad' : '');
   $('bEstop').classList.toggle('hide', s.estop); $('bEstopClear').classList.toggle('hide', !s.estop); $('bEstopClear').disabled = false;
@@ -473,7 +474,7 @@ $('bAdvice').onclick = () => {
   if (!text) { out('oAdvice', 'Write advice before sending.', 'bad'); return; }
   act('advice', () => api('POST', '/v1/op/advice', { text }), 'oAdvice', r => { $('advice').value = ''; return 'Saved for Gemma\'s next decision (' + r.pending_count + ' pending).'; });
 };
-$('bLm1').onclick = () => act('lm', () => api('POST', '/v1/op/lmstudio/probe'));
+$('bLm1').onclick = () => act('lm', () => api('POST', '/v1/op/model/probe'));
 $('bEstop').onclick = () => act('estop', () => api('POST', '/v1/op/estop'));
 $('bEstopClear').onclick = () => act('estop', () => api('POST', '/v1/op/estop/clear'));
 $('bEdgeStop').onclick = () => act('edge', () => api('POST', '/v1/op/edge/stop'));

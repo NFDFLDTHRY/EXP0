@@ -64,7 +64,7 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 DEFAULT_CONFIG = {
     "role": "all-in-one",
     "port": 8787,
-    "lmstudio_url": "http://127.0.0.1:1234",
+    "model_url": "http://127.0.0.1:1234",
     "opponent_login": "bigrigjay",
     "opponent_id": None,
     "opponent_display": None,
@@ -628,9 +628,10 @@ class Controller:
         VAR.mkdir(parents=True, exist_ok=True)
         os.chmod(VAR, 0o700)
         self.lock = threading.RLock()
-        self.config = merged(DEFAULT_CONFIG, load_json(CONFIG_PATH, {}))
+        stored_config = load_json(CONFIG_PATH, {})
+        self.config = read_config()
         # Drop V1's private commander/permission settings from persisted config.
-        legacy = "permission" in self.config
+        legacy = "permission" in self.config or (isinstance(stored_config, dict) and "lmstudio_url" in stored_config)
         self.config.pop("permission", None)
         limits = self.config["limits"]
         for old_key in ("whisper_min_interval_s", "whisper_max_per_min", "repeat_window_s"):
@@ -653,7 +654,7 @@ class Controller:
         self.recent_chat: collections.deque = collections.deque(maxlen=12)
         self.recent_commands: collections.deque = collections.deque(maxlen=12)
         self.tests: dict = {"eventsub": None, "chat_read": None, "chat_send": None}
-        self.lm = None
+        self.model_status = None
         self.dirty = False
         self.started = time.time()
         self.stopping = threading.Event()
@@ -1266,32 +1267,15 @@ class Controller:
 
     # ---- Gemma proposes, rule engine resolves, state and evidence commit, Gemma voices observations
     def _gemma_model(self) -> str:
-        probe = lm_check(self.config["lmstudio_url"])
+        probe = model_check(self.config["model_url"])
         with self.lock:
-            self.lm = probe
+            self.model_status = probe
         if not probe["reachable"]:
-            raise ValueError("LM Studio unavailable: " + str(probe.get("error")))
-        ids = [m for m in probe["models"] if isinstance(m, str) and re.search(r"gemma[._/-]?4", m, re.I)]
-        if not ids:
-            raise ValueError("no loaded Gemma 4 model")
-        def rank(name):
-            lower = name.lower()
-            return (0 if re.search(r"(?:e?4b|4b)(?:[^0-9]|$)", lower) else 1, len(name))
-        return sorted(ids, key=rank)[0]
+            raise ValueError("local Gemma server unavailable: " + str(probe.get("error")))
+        return select_gemma(probe["models"])
 
-    def _lm_chat(self, model: str, messages: list, tokens: int = 180) -> str:
-        st, obj = http_json("POST", self.config["lmstudio_url"].rstrip("/") + "/v1/chat/completions",
-                            body={"model": model, "messages": messages, "temperature": 0.3,
-                                  "max_tokens": tokens, "response_format": {"type": "json_object"}}, timeout=60)
-        if st != 200:
-            raise ValueError("Gemma HTTP " + str(st) + ": " + str(obj.get("error") or obj.get("message"))[:120])
-        choices = obj.get("choices") or []
-        if not choices or not isinstance(choices[0], dict):
-            raise ValueError("Gemma returned no choices")
-        content = (choices[0].get("message") or {}).get("content")
-        if not isinstance(content, str):
-            raise ValueError("Gemma content is not a string")
-        return content
+    def _model_chat(self, model: str, messages: list, tokens: int = 180) -> str:
+        return model_chat(self.config["model_url"], model, messages, tokens)
 
     def _model_proposal(self, item: dict, world: dict, council: list, advice: list):
         model = self._gemma_model()
@@ -1312,7 +1296,7 @@ class Controller:
             {"role": "user", "content": json.dumps(projection, separators=(",", ":"), ensure_ascii=False)},
         ]
         for attempt in range(2):
-            raw = self._lm_chat(model, messages)
+            raw = self._model_chat(model, messages)
             try:
                 proposal = validate_proposal(json.loads(raw))
                 self.hist.required("model", {"op": "proposal_accepted", "model": model,
@@ -1334,7 +1318,7 @@ class Controller:
         self.hist.required("model", {"op": "narration_context", "model": model,
                                      "message_id": message_id, "observation": observation})
         try:
-            raw = self._lm_chat(model, [
+            raw = self._model_chat(model, [
                 {"role": "system", "content": "You narrate only the resolved, observable facts. Return a JSON object "
                  "with exactly one key, narration. It MUST start with the exact supplied summary, verbatim. "
                  "You may append exactly one of these atmospheric phrases: 'The air holds its breath.' "
@@ -1405,7 +1389,7 @@ class Controller:
                         self.save_state_locked()
                         skipped = True
                 if skipped:
-                    self._enqueue_chat("Gemma could not resolve that order. Try it again after checking LM Studio.",
+                    self._enqueue_chat("Gemma could not resolve that order. Check the local Gemma server and try again.",
                                        "skip:" + item["message_id"], "model did not produce a legal proposal")
                 continue
             try:
@@ -1444,12 +1428,12 @@ class Controller:
                         self.state["pending"].pop(0)
                         self.save_state_locked()
 
-    # ---- LM Studio status
-    def lm_probe(self) -> dict:
-        res = lm_check(self.config["lmstudio_url"])
+    # ---- local Gemma status; completing a tiny request proves more than a model listing
+    def model_probe(self) -> dict:
+        res = probe_model(self.config["model_url"])
         with self.lock:
-            self.lm = res
-        self.hist.append("session", {"op": "lmstudio_probe", **res})
+            self.model_status = res
+        self.hist.append("session", {"op": "model_probe", **res})
         return res
 
     def status(self) -> dict:
@@ -1460,7 +1444,7 @@ class Controller:
                 "estop": bool(self.state.get("estop")),
                 "config": {k: cfg.get(k) for k in ("port", "client_id", "opponent_login", "opponent_id",
                                                    "opponent_display", "self_id", "self_login", "ally_url",
-                                                   "village_url", "lmstudio_url", "limits")},
+                                                   "village_url", "model_url", "limits")},
                 "required_scopes": list(REQUIRED_SCOPES), "twitch": self.twitch_public(),
                 "edge": {"running": self.edge.running(), "connected": self.edge.connected,
                          "session_id": self.edge.session_id, "subs": self.edge.subs, "error": self.edge.error,
@@ -1471,13 +1455,13 @@ class Controller:
                 "recent_council": [{"t": x.get("t"), "chatter": x.get("chatter"), "text": x.get("text")}
                                    for x in (self.state.get("council") or [])],
                 "advice_count": len(self.state.get("advice") or []),
-                "history": {"seq": self.hist.seq, "ok": self.hist.ok}, "lmstudio": self.lm,
+                "history": {"seq": self.hist.seq, "ok": self.hist.ok}, "model": self.model_status,
             }
 
-def lm_check(base: str) -> dict:
+def model_check(base: str) -> dict:
     host = urllib.parse.urlsplit(base).hostname or ""
     if host not in LOOPBACK_HOSTS:
-        return {"reachable": False, "models": [], "error": "lmstudio_url must be a loopback address (127.0.0.1)",
+        return {"reachable": False, "models": [], "error": "model_url must be a loopback address (127.0.0.1)",
                 "url": base, "checked_at": now_iso()}
     st, obj = http_json("GET", base.rstrip("/") + "/v1/models", timeout=3)
     data = obj.get("data") if isinstance(obj.get("data"), list) else None
@@ -1485,6 +1469,58 @@ def lm_check(base: str) -> dict:
     return {"reachable": ok, "http": st, "url": base, "checked_at": now_iso(),
             "models": [m.get("id") for m in data if isinstance(m, dict)] if ok else [],
             "error": None if ok else (obj.get("error") or f"HTTP {st}")}
+
+
+def select_gemma(models: list) -> str:
+    ids = [m for m in models if isinstance(m, str) and re.search(r"gemma[._/-]?4", m, re.I)]
+    if not ids:
+        raise ValueError("no imported Gemma 4 model in local server")
+    # A 4B-class model is the first candidate for an 8 GB machine; 26B A4B is never selected over it.
+    def rank(name: str):
+        lower = name.lower()
+        if re.search(r"(?:^|[._/-])e4b(?:[._/-]|$)", lower):
+            return (0, len(name))
+        if re.search(r"(?:^|[._/-])e2b(?:[._/-]|$)", lower):
+            return (1, len(name))
+        return (2, len(name))
+    return sorted(ids, key=rank)[0]
+
+
+def model_chat(base: str, model: str, messages: list, tokens: int = 180, timeout: float = 180) -> str:
+    if urllib.parse.urlsplit(base).hostname not in LOOPBACK_HOSTS:
+        raise ValueError("model_url must be loopback")
+    st, obj = http_json("POST", base.rstrip("/") + "/v1/chat/completions",
+                        body={"model": model, "messages": messages, "max_completion_tokens": tokens,
+                              "response_format": {"type": "json_object"}}, timeout=timeout)
+    if st != 200:
+        raise ValueError("Gemma HTTP " + str(st) + ": " + str(obj.get("error") or obj.get("message"))[:120])
+    choices = obj.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        raise ValueError("Gemma returned no choices")
+    content = (choices[0].get("message") or {}).get("content")
+    if not isinstance(content, str):
+        raise ValueError("Gemma content is not a string")
+    return content
+
+
+def probe_model(base: str) -> dict:
+    result = model_check(base)
+    result["completion_ok"] = False
+    if not result["reachable"]:
+        return result
+    try:
+        model = select_gemma(result["models"])
+        result["selected_model"] = model
+        raw = model_chat(base, model, [
+            {"role": "system", "content": "EXP0 model health check. Return only the JSON object {\"ok\":true}."},
+            {"role": "user", "content": "Return the health check object."},
+        ], tokens=32, timeout=120)
+        if json.loads(raw) != {"ok": True}:
+            raise ValueError("health completion did not return {\"ok\":true}")
+        result["completion_ok"] = True
+    except (ValueError, TypeError, KeyError) as ex:
+        result["completion_error"] = str(ex)[:200]
+    return result
 
 
 # ----------------------------------------------------------------------------------------------- loopback API
@@ -1504,7 +1540,7 @@ ROUTES = {
     ("POST", "/v1/op/estop"): lambda c, b, q: c.set_estop(True),
     ("POST", "/v1/op/estop/clear"): lambda c, b, q: c.set_estop(False),
     ("POST", "/v1/op/game/new"): lambda c, b, q: c.new_game(),
-    ("POST", "/v1/op/lmstudio/probe"): lambda c, b, q: c.lm_probe(),
+    ("POST", "/v1/op/model/probe"): lambda c, b, q: c.model_probe(),
 }
 
 
@@ -1608,7 +1644,10 @@ class Server(http.server.ThreadingHTTPServer):
 
 # ----------------------------------------------------------------------------------------------- lifecycle
 def read_config() -> dict:
-    return merged(DEFAULT_CONFIG, load_json(CONFIG_PATH, {}))
+    loaded = load_json(CONFIG_PATH, {})
+    if isinstance(loaded, dict):
+        loaded.pop("lmstudio_url", None)  # never follow an old LM Studio endpoint after migration
+    return merged(DEFAULT_CONFIG, loaded)
 
 
 def running_pid():
@@ -1798,7 +1837,7 @@ def cmd_status() -> int:
     if st != 200:
         print(f"RUNNING pid {pid} but the API did not answer (HTTP {st}) - see ./exp0 logs")
         return 1
-    tw, ed, g, lm = s["twitch"], s["edge"], s["game"], s["lmstudio"]
+    tw, ed, g, model = s["twitch"], s["edge"], s["game"], s["model"]
     print(f"RUNNING  pid {pid}  127.0.0.1:{cfg['port']}  role {s['role']}  uptime {s['uptime_s']}s"
           + ("  E-STOP" if s["estop"] else ""))
     print(f"  twitch   {'valid' if tw['valid'] else ('INVALID' if tw['token'] else 'no token')}"
@@ -1810,7 +1849,7 @@ def cmd_status() -> int:
     print("  tests    " + "  ".join(f"{k}:{'ok' if (t.get(k) or {}).get('ok') else '-'}" for k in ("eventsub", "chat_read", "chat_send")))
     print(f"  game     {('day ' + str(g['world']['day']) + '  turn ' + str(g['world']['turn']) +
                          '  version ' + str(g['version'])) if g else 'none (confirm identity and resolve BigRigJay)'}")
-    print(f"  lmstudio {('reachable ' + ', '.join(lm['models'])) if lm and lm.get('reachable') else ('unreachable' if lm else 'not probed')}")
+    print(f"  model    {('ready ' if model.get('completion_ok') else 'listed ') + ', '.join(model['models']) if model and model.get('reachable') else ('unreachable' if model else 'not probed')}")
     print(f"  history  seq {s['history']['seq']}{'' if s['history']['ok'] else '  WRITE FAILING'}")
     print("  ally     " + ally_link(cfg, key))
     print("  village  " + published_page_url(cfg["village_url"]))
@@ -1918,15 +1957,17 @@ def cmd_doctor() -> int:
         line("PASS" if s["edge"]["connected"] else "WARN", "EventSub edge " + ("connected" if s["edge"]["connected"] else "not connected"))
         if s["estop"]:
             line("WARN", "E-STOP is set")
-    lm = lm_check(cfg["lmstudio_url"])
-    line("PASS" if lm["reachable"] else "FAIL",
-         f"LM Studio {cfg['lmstudio_url']}: " + (("models: " + ", ".join(lm["models"])) if lm["reachable"] else lm["error"]))
+    model = probe_model(cfg["model_url"])
+    line("PASS" if model["reachable"] else "FAIL",
+         f"local Gemma server {cfg['model_url']}: " + (("models: " + ", ".join(model["models"])) if model["reachable"] else model["error"]))
+    line("PASS" if model["completion_ok"] else "FAIL",
+         "Gemma completion " + ("returned valid JSON" if model["completion_ok"] else model.get("completion_error", "server unavailable")))
     ip = lan_ip()
-    port = urllib.parse.urlsplit(cfg["lmstudio_url"]).port or 1234
+    port = urllib.parse.urlsplit(cfg["model_url"]).port or 1234
     if ip:
         exposed = tcp_open(ip, port)
         line("FAIL" if exposed else "PASS",
-             f"LM Studio not reachable from the network ({ip}:{port} {'OPEN - turn off Serve on Local Network' if exposed else 'closed'})")
+             f"Gemma server not reachable from the network ({ip}:{port} {'OPEN - bind it to 127.0.0.1' if exposed else 'closed'})")
     print(f"{'OK' if not fails else str(fails) + ' FAIL'}")
     return 1 if fails else 0
 

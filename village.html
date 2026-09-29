@@ -4,275 +4,71 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>EXP0 / VILLAGE</title>
+<title>EXP0 / Village</title>
 <style>
-  :root { --bg:#100e0b; --panel:#17140f; --fg:#e6e0d6; --dim:#9a9285; --line:#2e2820; --ok:#6fd38d; --warn:#f2c14e; --bad:#ff6b6b; --acc:#f5b25c; }
+  :root { --bg:#100e0b; --panel:#17140f; --fg:#e6e0d6; --dim:#aea596; --line:#3b3023; --acc:#f5b25c; }
   * { box-sizing:border-box; }
-  html,body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 ui-monospace,Menlo,Consolas,"Liberation Mono",monospace; }
-  main { max-width:760px; margin:0 auto; padding:14px 16px 80px; }
-  h1 { font-size:18px; letter-spacing:.06em; margin:4px 0 6px; color:var(--acc); }
-  .sub { color:var(--dim); font-size:13px; margin:0 0 12px; }
-  section { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin:0 0 12px; }
-  h3 { font-size:13px; margin:0 0 8px; letter-spacing:.05em; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .badge { font-size:11px; padding:1px 7px; border-radius:10px; border:1px solid var(--line); color:var(--dim); }
-  .badge.ok { color:#0b1a10; background:var(--ok); border-color:var(--ok); }
-  .badge.warn { color:#1a1400; background:var(--warn); border-color:var(--warn); }
-  .badge.bad { color:#1a0000; background:var(--bad); border-color:var(--bad); }
-  .kv { display:grid; grid-template-columns:max-content 1fr; gap:2px 12px; font-size:13px; }
-  .kv > div:nth-child(odd) { color:var(--dim); }
-  code { background:#221d16; padding:1px 5px; border-radius:3px; word-break:break-all; }
-  button { min-height:44px; padding:8px 14px; margin:6px 6px 0 0; background:#2a2219; color:var(--fg); border:1px solid #4a3d2c; border-radius:5px; font:inherit; cursor:pointer; }
-  button.primary { background:#6a4a20; border-color:#a8773b; color:#fff; }
-  button:disabled { opacity:.4; cursor:not-allowed; }
-  .note { color:var(--dim); font-size:12.5px; }
-  .banner { border:1px solid var(--bad); background:#2a1111; color:#ffc2c2; padding:8px 10px; border-radius:5px; margin:0 0 10px; }
-  .banner.warn { border-color:var(--warn); background:#2a2410; color:#ffe7a6; }
-  .banner.ok { border-color:var(--ok); background:#0f2a1a; color:#b8f5cf; }
-  table { border-collapse:collapse; width:100%; font-size:12.5px; }
-  td, th { text-align:left; padding:3px 6px; border-top:1px solid var(--line); vertical-align:top; }
-  th { color:var(--dim); font-weight:normal; }
-  ul { margin:4px 0; padding-left:18px; }
+  html,body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 ui-monospace,Menlo,Consolas,"Liberation Mono",monospace; }
+  main { max-width:760px; margin:0 auto; padding:18px 16px 60px; }
+  h1 { color:var(--acc); font-size:22px; letter-spacing:.06em; margin:0 0 4px; }
+  h2 { color:var(--acc); font-size:15px; letter-spacing:.06em; margin:0 0 9px; }
+  p { margin:7px 0 12px; }
+  .sub, .note { color:var(--dim); }
+  .sub { margin:0 0 18px; }
+  .note { font-size:13px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:14px 16px; margin:0 0 13px; }
+  code { background:#2b231b; color:#ffe2b7; border-radius:3px; padding:2px 5px; white-space:nowrap; }
   a { color:var(--acc); }
-  .hide { display:none !important; }
+  a.play { display:inline-block; background:#6a4a20; border:1px solid #a8773b; border-radius:5px; color:white; font-weight:bold; text-decoration:none; padding:10px 15px; margin:5px 0 4px; }
+  ul { margin:6px 0; padding-left:20px; }
+  li { margin:5px 0; }
+  table { border-collapse:collapse; width:100%; }
+  th,td { text-align:left; padding:7px 6px; border-top:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:normal; }
+  .scroll { overflow-x:auto; }
 </style>
 </head>
 <body>
 <main>
   <h1>EXP0 / VILLAGE</h1>
-  <p class="sub">The streamer's side. You command the opposing civilization; your chat is your council. This page talks to Twitch only: your commands travel as whispers from your account to the enemy account, and nobody else's whispers count.</p>
-  <div id="banners"></div>
+  <p class="sub">BigRigJay commands a village. Chat is the council. Gemma plays the opposing force and narrates through one account in Twitch chat.</p>
 
   <section>
-    <h3>INVITE <span class="badge" id="bInv"></span></h3>
-    <div id="invBody"></div>
+    <h2>PLAY IN BIGRIGJAY'S CHAT</h2>
+    <p>This page is a public guide. Open it freely; it grants no game authority. No EXP0 login is needed for Jay or viewers. The game reads normal Twitch chat, and its current state is available with <code>!status</code>.</p>
+    <a class="play" href="https://www.twitch.tv/bigrigjay" target="_blank" rel="noopener">OPEN BIGRIGJAY'S CHANNEL</a>
   </section>
 
   <section>
-    <h3>SIGN IN <span class="badge" id="bMe"></span></h3>
-    <div id="meBody"></div>
-    <div><button id="bSignIn" class="primary">Sign in with Twitch</button><button id="bSignOut">Sign out</button></div>
-    <p class="note">Asks for one permission: <code>user:manage:whispers</code> (send and receive whispers). Your token stays in this browser tab.</p>
+    <h2>THE SITUATION</h2>
+    <p>A village of 18 faces an enemy host. Scout its movements, gather supplies, fortify, recruit, negotiate, or risk an attack. Each accepted commander action advances one day and consumes food equal to one for every six villagers, rounded up. The state persists across controller restarts.</p>
+    <p class="note">Initial supplies: 24 food, 10 wood, 6 stone, 3 defenders; defense 2, morale 65. The enemy begins at strength 8 with 10 supply. The live world may have moved on: ask <code>!status</code> in chat.</p>
   </section>
 
   <section>
-    <h3>PRIVATE COMMAND LINK <span class="badge" id="bLink"></span></h3>
-    <div id="linkBody"></div>
-    <div><button id="bJoin" class="primary">Join game</button><button id="bPing">Ping the enemy controller</button></div>
-    <table id="log" class="hide"><thead><tr><th>seq</th><th>type</th><th>tries</th><th>status</th><th>ms</th></tr></thead><tbody></tbody></table>
-    <p class="note">Each command is one whisper with a sequence number. Until the enemy controller answers with an ACK for that number, the same number is retried; the controller never applies a number twice. Twitch rules: your account needs a verified phone number to whisper; the enemy account must accept whispers from you.</p>
+    <h2>JAY COMMANDS</h2>
+    <p>Only messages from BigRigJay's numeric Twitch chatter ID issue commander actions. Type these in normal channel chat:</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Command</th><th>What it attempts</th></tr></thead>
+      <tbody>
+        <tr><td><code>!do scout north</code></td><td>Look for enemy pressure. East, south, and west also work.</td></tr>
+        <tr><td><code>!do gather food</code></td><td>Gain 8 food. Gathering wood gains 5; stone gains 4.</td></tr>
+        <tr><td><code>!do build palisade</code></td><td>Spend 5 wood and 2 stone for 2 defense.</td></tr>
+        <tr><td><code>!do recruit defenders</code></td><td>Spend 4 food for 2 defenders.</td></tr>
+        <tr><td><code>!do defend west</code></td><td>Prepare a defense; choose a direction or type <code>!do defend</code> for general defense.</td></tr>
+        <tr><td><code>!do attack east</code></td><td>Send defenders toward a direction.</td></tr>
+        <tr><td><code>!do negotiate</code></td><td>Spend 3 food to stop a raid that turn.</td></tr>
+        <tr><td><code>!status</code> / <code>!help</code></td><td>Ask for the live world or a command reminder.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">The enemy's front starts hidden. Scouting or a raid may reveal it. Gemma can raid (1 supply), fortify (+1 strength for 2 supply), recruit (+2 strength for 3 supply), or wait. An unaffordable move becomes a quiet turn. Reduce enemy strength to zero to win; population or morale reaching zero loses the game.</p>
   </section>
 
   <section>
-    <h3>YOUR CIVILIZATION <span class="badge">not built yet</span></h3>
-    <p>Resources, known map, build, recruit, scout, research, military orders, diplomacy and the chat council arrive with gates G10&ndash;G13, after the wiring is proven. Nothing here can see what the enemy can see: this page will only ever show what your civilization has legally discovered.</p>
+    <h2>CHAT COUNCIL</h2>
+    <p>Viewers can type <code>!suggest fortify west</code>, <code>!suggest gather food</code>, or any short proposal. Suggestions enter Gemma's recent council context; they do not spend resources or advance the day. Viewers can also use <code>!status</code> and <code>!help</code>.</p>
+    <p class="note">The explicit commands are the dependable path tonight. Results are decided by the world rules before the bot narrates them. A clever sentence in chat cannot invent a victory.</p>
   </section>
 </main>
-
-<script>
-'use strict';
-const SS = window.sessionStorage;
-const K = { inv: 'exp0.village.invite', tok: 'exp0.village.token', st: 'exp0.village.oauth_state', seq: 'exp0.village.next_seq' };
-const PAGE_URL = location.origin + location.pathname;
-const $ = id => document.getElementById(id);
-const ssGet = k => { try { return JSON.parse(SS.getItem(k)); } catch (e) { return null; } };
-const ssSet = (k, v) => { try { SS.setItem(k, JSON.stringify(v)); } catch (e) {} };
-const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const rand = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
-
-let INV = ssGet(K.inv), TOKEN = ssGet(K.tok), ME = null, note = null;
-let ws = null, pendingWs = null, wsSession = null, subOk = false, subErr = null, lastMsgAt = 0, keepalive = 10, backoff = 1000, reconnectTimer = null;
-let joined = false, nextSeq = ssGet(K.seq), busy = false, sessionDead = false;
-const waiters = new Map();
-const rows = [];
-
-// Runs at load and on hashchange (a new invite pasted into this same tab only changes the fragment).
-function intake() {
-  if (location.hash.length < 2) return false;
-  const h = new URLSearchParams(location.hash.slice(1));
-  history.replaceState(null, '', location.pathname + location.search);
-  if (h.get('s') || h.get('e') || h.get('c')) {
-    const inv = { c: h.get('c') || '', e: h.get('e') || '', el: h.get('el') || '', s: h.get('s') || '', o: h.get('o') || '' };
-    if (/^[a-z0-9]{20,64}$/.test(inv.c) && /^\d{1,20}$/.test(inv.e) && /^[a-f0-9]{8,32}$/.test(inv.s)) {
-      if (!INV || INV.s !== inv.s || INV.e !== inv.e) { SS.removeItem(K.seq); nextSeq = null; joined = false; sessionDead = false; }
-      INV = inv; ssSet(K.inv, inv);
-    } else note = ['This invite link is damaged. Ask for a new one.', ''];
-  }
-  if (h.get('access_token')) {
-    const expected = ssGet(K.st); SS.removeItem(K.st);
-    if (expected && h.get('state') === expected) { TOKEN = h.get('access_token'); ssSet(K.tok, TOKEN); }
-    else note = ['Discarded a sign-in whose state this page did not issue. Sign in again.', ''];
-  } else if (h.get('error')) { SS.removeItem(K.st); note = ['Twitch: ' + h.get('error') + ' ' + (h.get('error_description') || ''), '']; }
-  return true;
-}
-intake();
-window.addEventListener('hashchange', () => { if (intake()) { render(); if (subOk && !joined && !sessionDead) join(); } });
-
-function banner(id, html, cls) { let b = $('bn-' + id); if (!html) { if (b) b.remove(); return; } if (!b) { b = document.createElement('div'); b.id = 'bn-' + id; $('banners').appendChild(b); } b.className = 'banner ' + (cls || ''); b.innerHTML = html; }
-function badge(id, text, cls) { const el = $(id); el.textContent = text; el.className = 'badge' + (cls ? ' ' + cls : ''); }
-
-async function twitch(method, url, body) {
-  let r;
-  try {
-    r = await fetch(url, { method, headers: Object.assign({ 'Authorization': 'Bearer ' + TOKEN, 'Client-Id': INV.c }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
-  } catch (e) { return { status: 0, body: { message: 'network error' } }; }
-  let j = {}; try { j = await r.json(); } catch (e) {}
-  return { status: r.status, body: j };
-}
-
-function signOut(msg) {
-  TOKEN = null; ME = null; SS.removeItem(K.tok); joined = false; subOk = false;
-  if (ws) { ws.onclose = null; ws.close(); ws = null; }
-  if (msg) note = [msg, ''];
-  render();
-}
-
-async function validate() {
-  let r;
-  try { r = await fetch('https://id.twitch.tv/oauth2/validate', { headers: { 'Authorization': 'OAuth ' + TOKEN } }); }
-  catch (e) { note = ['Cannot reach Twitch.', '']; return false; }
-  if (r.status === 401) { signOut('Your Twitch sign-in expired or was revoked. Sign in again.'); return false; }
-  const v = await r.json();
-  ME = { login: v.login, user_id: v.user_id, scopes: v.scopes || [] };
-  return true;
-}
-
-// ---- EventSub (browser): whispers addressed to the streamer's account
-function connect(url) {
-  const sock = new WebSocket(url || 'wss://eventsub.wss.twitch.tv/ws');
-  sock.onmessage = ev => onWs(sock, ev.data);
-  sock.onclose = ev => {
-    if (sock === pendingWs) { pendingWs = null; return; }
-    if (sock !== ws) return;
-    ws = null; subOk = false; wsSession = null; render(); scheduleReconnect();
-  };
-  if (!url) ws = sock; else pendingWs = sock;
-  return sock;
-}
-function scheduleReconnect() {
-  if (reconnectTimer || !TOKEN || !ME) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; if (TOKEN && ME && !ws) connect(); }, backoff);
-  backoff = Math.min(backoff * 2, 30000);
-}
-async function onWs(sock, data) {
-  lastMsgAt = Date.now();
-  let m; try { m = JSON.parse(data); } catch (e) { return; }
-  const t = m.metadata && m.metadata.message_type;
-  if (t === 'session_welcome') {
-    const s = m.payload.session;
-    if (sock === pendingWs) { const old = ws; ws = sock; pendingWs = null; wsSession = s.id; if (old) { old.onclose = null; old.close(); } render(); return; }
-    wsSession = s.id; keepalive = s.keepalive_timeout_seconds || 10;
-    const r = await twitch('POST', 'https://api.twitch.tv/helix/eventsub/subscriptions', { type: 'user.whisper.message', version: '1', condition: { user_id: ME.user_id }, transport: { method: 'websocket', session_id: s.id } });
-    subOk = r.status === 202; subErr = subOk ? null : ('HTTP ' + r.status + ' ' + (r.body.message || ''));
-    if (subOk) backoff = 1000;
-    render();
-    if (subOk && !joined && !sessionDead) join();
-    return;
-  }
-  if (t === 'session_keepalive') return;
-  if (t === 'session_reconnect') { connect(m.payload.session.reconnect_url); return; }
-  if (t === 'revocation') { subOk = false; subErr = 'subscription revoked: ' + (m.payload.subscription || {}).status; render(); return; }
-  if (t === 'notification' && m.metadata.subscription_type === 'user.whisper.message') onWhisper(m.payload.event);
-}
-setInterval(() => { if (ws && ws.readyState === 1 && Date.now() - lastMsgAt > (keepalive + 5) * 1000) ws.close(); }, 1000);
-
-function onWhisper(e) {
-  if (!INV || e.from_user_id !== INV.e) return;   // only the enemy account's numeric id counts
-  let env; try { env = JSON.parse(e.whisper.text); } catch (x) { return; }
-  if (!env || env.exp0 !== 1 || env.sid !== INV.s) return;
-  const w = waiters.get(env.ack);
-  if (w) { waiters.delete(env.ack); clearTimeout(w.timer); w.resolve(env); }
-}
-function waitAck(seq, ms) {
-  return new Promise(resolve => {
-    const prev = waiters.get(seq); if (prev) { clearTimeout(prev.timer); prev.resolve(null); }
-    const timer = setTimeout(() => { waiters.delete(seq); resolve(null); }, ms);
-    waiters.set(seq, { resolve, timer });
-  });
-}
-function cancelWait(seq) { const w = waiters.get(seq); if (w) { clearTimeout(w.timer); waiters.delete(seq); w.resolve(null); } }
-
-// ---- stop-and-wait sender: one command in flight, same seq until ACK
-async function sendCommand(type, payload) {
-  if (busy || !subOk || !ME || !INV) return null;
-  if (type !== 'sync' && !Number.isInteger(nextSeq)) return null;
-  busy = true;
-  const seq = type === 'sync' ? 0 : nextSeq;
-  const text = JSON.stringify({ exp0: 1, sid: INV.s, seq, type, payload: payload || {} });
-  const row = { seq, type, tries: 0, status: 'sending', t0: Date.now(), ms: null };
-  rows.unshift(row); render();
-  let ack = null;
-  for (let attempt = 1; attempt <= 6 && !ack; attempt++) {
-    row.tries = attempt; row.status = attempt === 1 ? 'sent, waiting for ACK' : 'retrying the same seq'; render();
-    const p = waitAck(seq, 8000);
-    const r = await twitch('POST', 'https://api.twitch.tv/helix/whispers?from_user_id=' + encodeURIComponent(ME.user_id) + '&to_user_id=' + encodeURIComponent(INV.e), { message: text });
-    if (r.status !== 204) {
-      cancelWait(seq);
-      row.status = 'Twitch refused the whisper: HTTP ' + r.status + ' ' + (r.body.message || '');
-      if (r.status === 401) { busy = false; signOut('Twitch rejected your sign-in. Sign in again.'); return null; }
-      if (r.status === 403) { row.status += ' (your account needs a verified phone number, or the enemy account blocks whispers from you)'; break; }
-      render(); await sleep(r.status === 429 ? 15000 : 3000); continue;
-    }
-    ack = await p;
-    if (!ack) { row.status = 'no ACK within 8s'; render(); }
-  }
-  row.ms = Date.now() - row.t0;
-  if (!ack) { if (!/refused/.test(row.status)) row.status = 'gave up after ' + row.tries + ' tries (the controller may be stopped or in E-STOP)'; }
-  else if (seq === 0 && ack.ok) { joined = true; nextSeq = ack.expect; ssSet(K.seq, nextSeq); row.status = 'joined; next seq ' + nextSeq; }
-  else if (ack.ok) { nextSeq = seq + 1; ssSet(K.seq, nextSeq); row.status = 'ACK' + (ack.dup ? ' (already applied earlier; not applied twice)' : '') + (ack.result ? ' ' + JSON.stringify(ack.result) : ''); }
-  else if (ack.error === 'sequence_gap') { nextSeq = ack.expect; ssSet(K.seq, nextSeq); row.status = 'out of order; resynced to seq ' + nextSeq; }
-  else if (ack.error === 'wrong_session') { sessionDead = true; row.status = 'this invite is not the active game any more'; }
-  else { if (seq > 0) { nextSeq = seq + 1; ssSet(K.seq, nextSeq); } row.status = 'refused: ' + ack.error; }
-  busy = false; render();
-  return ack;
-}
-function join() { return sendCommand('sync'); }
-
-function render() {
-  if (note) banner('note', esc(note[0]), note[1]); else banner('note', null);
-  // invite
-  if (INV) {
-    badge('bInv', 'session ' + INV.s, 'ok');
-    $('invBody').innerHTML = '<div class="kv"><div>enemy account</div><div>' + esc(INV.el || '?') + ' (numeric id ' + esc(INV.e) + ')</div><div>game session</div><div>' + esc(INV.s) + '</div><div>invited commander</div><div>' + esc(INV.o || '?') + '</div></div>';
-  } else {
-    badge('bInv', 'no invite', 'bad');
-    $('invBody').innerHTML = '<p>Open the invite link the enemy sent you. It carries the game session in the part after #.</p>';
-  }
-  // sign in
-  $('bSignIn').disabled = !INV; $('bSignOut').disabled = !TOKEN;
-  $('bSignIn').classList.toggle('hide', !!TOKEN);
-  if (ME) {
-    const wrong = INV && INV.o && ME.login !== INV.o.toLowerCase();
-    const self = INV && ME.user_id === INV.e;
-    badge('bMe', ME.login, wrong || self ? 'warn' : 'ok');
-    $('meBody').innerHTML = '<div class="kv"><div>signed in as</div><div>' + esc(ME.login) + ' (numeric id ' + esc(ME.user_id) + ')</div></div>' +
-      (self ? '<p style="color:var(--bad)">This is the enemy account itself. Sign out and sign in as the streamer.</p>' : '') +
-      (wrong && !self ? '<p style="color:var(--warn)">The invite was made for ' + esc(INV.o) + '. The enemy controller only accepts commands from that account\'s numeric id, so commands from this account will be ignored.</p>' : '');
-  } else { badge('bMe', TOKEN ? 'checking' : 'signed out', TOKEN ? 'warn' : ''); $('meBody').innerHTML = TOKEN ? '<p>Checking your sign-in with Twitch&hellip;</p>' : ''; }
-  // link
-  badge('bLink', sessionDead ? 'invite expired' : (joined ? 'joined' : (subOk ? 'connected' : (ws ? 'connecting' : 'offline'))), sessionDead ? 'bad' : (joined ? 'ok' : (subOk ? 'warn' : '')));
-  $('linkBody').innerHTML = '<div class="kv"><div>EventSub</div><div>' + (ws && wsSession ? 'session ' + esc(wsSession) : (ws ? 'connecting' : 'offline')) + '</div><div>whisper subscription</div><div>' + (subOk ? 'enabled' : esc(subErr || '-')) + '</div><div>next seq</div><div>' + (Number.isInteger(nextSeq) ? nextSeq : '-') + '</div></div>';
-  $('bJoin').disabled = busy || !subOk || sessionDead; $('bPing').disabled = busy || !subOk || !joined || sessionDead;
-  $('log').classList.toggle('hide', !rows.length);
-  $('log').querySelector('tbody').innerHTML = rows.slice(0, 30).map(r => '<tr><td>' + r.seq + '</td><td>' + esc(r.type) + '</td><td>' + r.tries + '</td><td>' + esc(r.status) + '</td><td>' + (r.ms == null ? '' : r.ms) + '</td></tr>').join('');
-  banner('dead', sessionDead ? 'The enemy has started a new game session. Ask for the new invite link.' : null, 'warn');
-}
-
-$('bSignIn').onclick = () => {
-  if (!INV) return;
-  const state = rand(16); ssSet(K.st, state);
-  const q = new URLSearchParams({ response_type: 'token', client_id: INV.c, redirect_uri: PAGE_URL, scope: 'user:manage:whispers', state, force_verify: 'true' });
-  location.assign('https://id.twitch.tv/oauth2/authorize?' + q.toString());
-};
-$('bSignOut').onclick = () => signOut(null);
-$('bJoin').onclick = () => join();
-$('bPing').onclick = () => sendCommand('ping', {});
-
-(async function boot() {
-  render();
-  if (INV && TOKEN && await validate()) { render(); connect(); }
-  render();
-})();
-</script>
 </body>
 </html>

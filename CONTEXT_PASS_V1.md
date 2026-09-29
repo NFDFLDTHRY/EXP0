@@ -1,3 +1,5 @@
+> Historical V1 context. The current V2 product uses one Twitch login and normal chat commands; see README.md and GATES.md. Git history preserves the V1 experiment.
+
 ```text
 +====================================================================================================================+
 |                                         EXP0 — CONTEXT PASS V1                                                    |

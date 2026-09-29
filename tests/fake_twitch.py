@@ -1,12 +1,12 @@
-"""TEST-ONLY fake Twitch (id + Helix + EventSub WebSocket), fake githack static host, fake LM Studio.
+"""TEST-ONLY fake Twitch (id + Helix + EventSub WebSocket), fake GitHack host and LM Studio.
 
 Never used by the product. One aiohttp app served twice:
   http://127.0.0.1:<plain>   for the controller (EXP0_TWITCH_* environment overrides)
   https://127.0.0.1:<tls>    for Chromium, which maps raw.githack.com, id.twitch.tv, api.twitch.tv and
                              eventsub.wss.twitch.tv onto it (--host-resolver-rules), so the pages run unmodified.
-Behaviour copied from the Twitch docs where it matters: implicit grant redirect with #fragment, validate,
+Behaviour copied from Twitch where it matters: implicit grant redirect with #fragment, validate,
 users, EventSub WebSocket welcome/keepalive/reconnect/close codes, subscriptions bound to a session,
-chat echo, whispers (204, 500-char first whisper, silent drops), CORS on the API hosts.
+chat echo and CORS on the API hosts. This fake cannot prove live Twitch delivery.
 """
 from __future__ import annotations
 
@@ -29,10 +29,8 @@ USERS = {
     "555": {"id": "555", "login": "viewer1", "display_name": "Viewer1"},
 }
 TOKENS = {
-    "tokenemy0001": {"user_id": "700001", "scopes": ["user:read:chat", "user:write:chat", "user:manage:whispers"]},
-    "tokjay000001": {"user_id": "123456", "scopes": ["user:manage:whispers"]},
-    "tokimpostor1": {"user_id": "666", "scopes": ["user:manage:whispers"]},
-    "tokother0001": {"user_id": "700002", "scopes": ["user:read:chat", "user:write:chat", "user:manage:whispers"]},
+    "tokenemy0001": {"user_id": "700001", "scopes": ["user:read:chat", "user:write:chat"]},
+    "tokother0001": {"user_id": "700002", "scopes": ["user:read:chat", "user:write:chat"]},
 }
 CTYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript", ".md": "text/plain; charset=utf-8"}
 
@@ -46,17 +44,18 @@ class FakeTwitch:
         self.static_root, self.plain_port, self.tls_port, self.lm_port = static_root, plain_port, tls_port, lm_port
         self.cert, self.key = cert, key
         self.tokens = {k: dict(v, valid=True) for k, v in TOKENS.items()}
-        self.login_as = {"ally.html": "tokenemy0001", "village.html": "tokjay000001"}
+        # There is exactly one OAuth surface in the V2 product: ally.html.
+        self.login_as = {"ally.html": "tokenemy0001"}
         self.sessions: dict = {}
         self.subs: dict = {}
         self.sub_posts: list = []
         self.chat_sent: list = []
-        self.whispers: list = []
-        self.whispered_pairs: set = set()
-        self.drop_next_whisper_to: set = set()
         self.delivered: list = []
         self.authorize_requests: list = []
         self.lm_models = ["gemma-4-e4b-it"]
+        self.lm_requests: list = []
+        self.lm_responses: list = []
+        self.lm_delay_s = 0.0
         self.lm_runner = None
         self.loop = None
         self.ready = threading.Event()
@@ -84,7 +83,6 @@ class FakeTwitch:
         app.router.add_post("/helix/eventsub/subscriptions", self.subscribe)
         app.router.add_delete("/helix/eventsub/subscriptions", self.unsubscribe)
         app.router.add_post("/helix/chat/messages", self.chat_send)
-        app.router.add_post("/helix/whispers", self.whisper)
         app.router.add_get("/ws", self.ws_handler)
         app.router.add_get("/NFDFLDTHRY/EXP0/main/{name}", self.static)
         app.router.add_route("OPTIONS", "/{tail:.*}", self.options)
@@ -132,6 +130,8 @@ class FakeTwitch:
             return web.Response(status=400, text="invalid client")
         page = q.get("redirect_uri", "").rsplit("/", 1)[-1]
         tok = self.login_as.get(page)
+        if tok is None:
+            return web.Response(status=403, text="this page has no OAuth flow")
         frag = urlencode({"access_token": tok, "scope": " ".join(self.tokens[tok]["scopes"]),
                           "state": q.get("state", ""), "token_type": "bearer"})
         raise web.HTTPFound(q["redirect_uri"] + "#" + frag)
@@ -188,9 +188,6 @@ class FakeTwitch:
         if typ == "channel.chat.message":
             if cond.get("user_id") != t["user_id"] or "user:read:chat" not in t["scopes"]:
                 return web.json_response({"error": "Forbidden", "status": 403, "message": "subscription missing proper authorization"}, status=403)
-        elif typ == "user.whisper.message":
-            if cond.get("user_id") != t["user_id"] or not {"user:read:whispers", "user:manage:whispers"} & set(t["scopes"]):
-                return web.json_response({"error": "Forbidden", "status": 403, "message": "subscription missing proper authorization"}, status=403)
         else:
             return web.json_response({"error": "Bad Request", "status": 400, "message": "unsupported type"}, status=400)
         sub_id = str(uuid.uuid4())
@@ -217,26 +214,6 @@ class FakeTwitch:
         asyncio.get_running_loop().call_later(0.05, lambda: asyncio.ensure_future(
             self.deliver_chat(body["broadcaster_id"], t["user_id"], body["message"], mid)))
         return web.json_response({"data": [{"message_id": mid, "is_sent": True, "drop_reason": None}]})
-
-    async def whisper(self, request):
-        t = self._helix_auth(request)
-        if not t:
-            return web.json_response({"error": "Unauthorized", "status": 401, "message": "Invalid OAuth token"}, status=401)
-        frm, to = request.query.get("from_user_id"), request.query.get("to_user_id")
-        if frm != t["user_id"] or "user:manage:whispers" not in t["scopes"]:
-            return web.json_response({"error": "Unauthorized", "status": 401, "message": "from_user_id must match the token"}, status=401)
-        if to not in USERS:
-            return web.json_response({"error": "Not Found", "status": 404, "message": "to_user_id not found"}, status=404)
-        msg = (await request.json()).get("message", "")
-        limit = 10000 if (frm, to) in self.whispered_pairs else 500
-        self.whispered_pairs.add((frm, to))
-        dropped = to in self.drop_next_whisper_to
-        self.whispers.append({"from": frm, "to": to, "message": msg[:limit], "t": time.time(), "dropped": dropped})
-        if dropped:
-            self.drop_next_whisper_to.discard(to)
-        else:
-            asyncio.get_running_loop().call_later(0.05, lambda: asyncio.ensure_future(self.deliver_whisper(frm, to, msg[:limit])))
-        return web.Response(status=204)
 
     # ---------------------------------------------------------------- EventSub websocket
     async def ws_handler(self, request):
@@ -310,15 +287,8 @@ class FakeTwitch:
               "source_message_id": None, "source_badges": None}
         return await self.notify("channel.chat.message", lambda c: c.get("broadcaster_user_id") == broadcaster_id, ev)
 
-    async def deliver_whisper(self, frm: str, to: str, text: str, display_name: str | None = None):
-        u, r = USERS[frm], USERS[to]
-        ev = {"from_user_id": u["id"], "from_user_login": u["login"], "from_user_name": display_name or u["display_name"],
-              "to_user_id": r["id"], "to_user_login": r["login"], "to_user_name": r["display_name"],
-              "whisper_id": str(uuid.uuid4()), "whisper": {"text": text}}
-        return await self.notify("user.whisper.message", lambda c: c.get("user_id") == to, ev)
-
     # ---------------------------------------------------------------- test controls
-    def session_of(self, user_id: str, typ: str = "user.whisper.message"):
+    def session_of(self, user_id: str, typ: str = "channel.chat.message"):
         for sub in self.subs.values():
             if sub["type"] == typ and sub["status"] == "enabled" and sub["condition"].get("user_id") == user_id:
                 return sub["transport"]["session_id"]
@@ -347,7 +317,29 @@ class FakeTwitch:
 
         async def models(_request):
             return web.json_response({"object": "list", "data": [{"id": m, "object": "model", "owned_by": "organization_owner"} for m in self.lm_models]})
+        async def completions(request):
+            body = await request.json()
+            self.lm_requests.append(body)
+            delay = self.lm_delay_s
+            if delay:
+                await asyncio.sleep(delay)
+            if self.lm_responses:
+                proposed = self.lm_responses.pop(0)
+            elif (body.get("messages") or [{}])[0].get("content", "").startswith("You narrate"):
+                observation = json.loads(body["messages"][1]["content"])
+                proposed = {"narration": observation["summary"] + " The air holds its breath."}
+            else:
+                proposed = {"enemy_action": "wait", "enemy_target": None, "narration": "The enemy watches from the ridge."}
+            if isinstance(proposed, dict):
+                proposed = json.dumps(proposed, separators=(",", ":"))
+            return web.json_response({"id": "fake-gemma-" + uuid.uuid4().hex,
+                                      "object": "chat.completion", "created": int(time.time()),
+                                      "model": body.get("model", "gemma-4-e4b-it"),
+                                      "choices": [{"index": 0, "message": {"role": "assistant", "content": proposed},
+                                                   "finish_reason": "stop"}],
+                                      "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70}})
         app.router.add_get("/v1/models", models)
+        app.router.add_post("/v1/chat/completions", completions)
         self.lm_runner = web.AppRunner(app)
         await self.lm_runner.setup()
         await web.TCPSite(self.lm_runner, "127.0.0.1", self.lm_port).start()

@@ -1,77 +1,60 @@
-# EXP0: user + Gemma 4 vs bigrigjay + Twitch chat
+# EXP0 — BigRigJay and chat versus Gemma
 
-Can a small local Gemma model run a coherent RTS civilization, cooperate with one human ally, reason under
-fog of war, and fight a streamer-led civilization whose social intelligence comes from Twitch?
-The full map is [`CONTEXT_PASS_V1.md`](CONTEXT_PASS_V1.md); the rules for the Twitch machinery are
-[`FOUNDATION.md`](FOUNDATION.md); what is proven so far is in [`GATES.md`](GATES.md).
+EXP0 is a small persistent village war game played in [BigRigJay's Twitch chat](https://www.twitch.tv/bigrigjay). Jay commands the village with `!do`; viewers advise with `!suggest`. A local Gemma model chooses the enemy move. The rule engine resolves the turn and persists the result before EXP0 narrates through **your** Twitch account.
 
-**Current state: the wiring (gates G0–G7).** Gemma, the world engine and the game itself are not built yet.
-Wiring first, then war.
+Exactly one Twitch account authorizes EXP0: yours. Jay and viewers use ordinary chat. Their numeric Twitch chatter IDs determine their roles; a display name grants no authority. [village.html](https://raw.githack.com/NFDFLDTHRY/EXP0/main/village.html) is a public companion page and never authenticates anyone.
 
-## The two links
+## Play on Debian 13
 
-| link | side | what it does now |
+1. In LM Studio, load a Gemma 4 instruction model that fits your machine and start its local server on `127.0.0.1:1234`. Keep **Serve on Local Network** off. EXP0 discovers the loaded model ID; it does not assume one.
+2. Clone and start:
+
+   ```sh
+   git clone https://github.com/NFDFLDTHRY/EXP0.git
+   cd EXP0
+   ./setup.sh
+   ./exp0 start
+   ```
+
+3. Open the **ally.html link printed by `./exp0 start` on that same machine**. Its `#p=…&k=…` fragment carries an ephemeral local controller key. Follow the page's wizard: create a public Twitch app if needed, save its Client ID, authorize **your** account for `user:read:chat` and `user:write:chat`, confirm the account, resolve `bigrigjay`, connect EventSub, and test reading and sending chat. The app's OAuth redirect URL must exactly match the ally URL displayed by the page, without the fragment.
+4. Check the loaded model in the LM Studio section. The world is seeded when your identity and Jay's numeric ID are resolved. Jay types `!help`, then `!do scout north` in his own Twitch chat. A viewer can type `!suggest fortify west`; advice enters the next bounded council context and has no direct authority. Your private advice box on ally.html also enters Gemma's next context.
+5. Use `./exp0 status`, `./exp0 logs`, and `./exp0 doctor` to inspect the system. **E-STOP** on ally.html prevents game mutation and Twitch output.
+
+After `./exp0 restart`, open the new ally link, authorize your account again, and reconnect EventSub. Twitch tokens exist only in controller memory. The world and processed message IDs remain in `var/`; `!status` should show the same world.
+
+If Chrome asks whether raw.githack.com may access apps on this device, allow local network access so ally.html can reach `127.0.0.1`. The public village page needs no local access.
+
+## Chat language
+
+| speaker | command | effect |
 |---|---|---|
-| **ally.html** — https://raw.githack.com/NFDFLDTHRY/EXP0/main/ally.html | you + Gemma (the enemy civilization, from Jay's point of view) | Twitch setup wizard to **TWITCH READY**, streamer-permission record, village invite, LM Studio check, E-STOP, evidence tail. Talks only to your controller on 127.0.0.1 |
-| **village.html** — https://raw.githack.com/NFDFLDTHRY/EXP0/main/village.html | bigrigjay | signs in with Twitch, joins your game session, sends sequenced commands to your controller as whispers and waits for ACKs |
+| Jay, by numeric Twitch ID | `!do scout north` | discover the enemy front if scouts find it |
+| Jay | `!do gather food` / `wood` / `stone` | collect one resource |
+| Jay | `!do build palisade` | spend wood and stone for defense |
+| Jay | `!do recruit defenders` | spend food and assign villagers to defense |
+| Jay | `!do defend` or `!do defend west` | protect the village this turn |
+| Jay | `!do attack east` | attack that front |
+| Jay | `!do negotiate` | offer food for a one-turn truce |
+| anyone | `!help`, `!status` | read instructions or the persisted world |
+| viewers | `!suggest gather food` | advise Gemma; does not execute a move |
 
-Open ally.html through the link that `./exp0 start` prints: its `#p=…&k=…` part carries the controller's
-ephemeral key and never leaves your browser.
+Each accepted commander move advances a day and consumes food. Gemma proposes an enemy action using only a legal projection; the rule engine validates and resolves it. Bad JSON or an illegal move cannot change canonical state. The explicit command language works without natural-language interpretation.
 
-## Start (Debian 13 x86-64)
+## Boundaries and files
 
-```sh
-git clone https://github.com/NFDFLDTHRY/EXP0 && cd EXP0
-./setup.sh            # the one supported entrypoint; checks the machine, writes var/, generates ./exp0
-./exp0 start          # controller on 127.0.0.1:8787, prints your ally.html link
-./exp0 doctor         # Twitch really answering, LM Studio, nothing listening on the network
-```
+The controller binds to `127.0.0.1` only. ally.html calls it with a tab-scoped session key; `village.html` is static and public. The controller alone calls Twitch and LM Studio. A Twitch access token is never stored in browser storage, `var/`, or history. `var/state.json` holds canonical state and dedupe IDs, and `var/history.ndjson` is append-only evidence. `var/` is gitignored. No database, cloud service, second login, whisper scope, or Termux role is required. `setup.sh` reports the unfinished split roles honestly.
 
-Then in ally.html, top to bottom: register the Twitch app (the page shows the two exact redirect URLs,
-the name, Category *Chat Bot*, Client Type *Public*) → Client ID → Authorize → confirm the account →
-resolve bigrigjay → Test EventSub → Test chat read → Test chat send → **TWITCH READY**. Then *New game
-session* and send the invite link to the streamer.
+| path | role |
+|---|---|
+| `controller/exp0d.py` | loopback API, Twitch EventSub/send, Gemma calls, persistence and lifecycle |
+| `controller/game.py` | deterministic grammar, legal model view, proposal validator and world rules |
+| `ally.html` | private operator setup and Gemma war council |
+| `village.html` | public how-to-play page |
+| `tests/` | simulated Twitch and LM Studio integration harness |
+| `GATES.md` | observed proof and pending real-world checks |
 
-`./exp0 start | stop | restart | status | logs | doctor`. Python 3.11+ standard library only; nothing to install.
-Termux is optional and not built yet: `setup.sh` says so and stops. Debian alone runs everything.
+The runtime uses Python 3.11+ standard library only. `./exp0 start | stop | restart | status | logs | doctor` is generated by `./setup.sh`. The historical V1 design remains in git history; [GATES.md](GATES.md) is the current evidence ledger.
 
-If you registered a Twitch app for the earlier V0 page, reuse it: add the two V1 redirect URLs to the same app.
-V0 (browser-only machine) is frozen at commit `0899498`:
-https://rawcdn.githack.com/NFDFLDTHRY/EXP0/0899498482f5311a4cc2788f4b223802798c83fd/setup.html
+## Verify
 
-## Files
-
-```
-setup.sh              the one supported entrypoint (generates ./exp0)
-controller/exp0d.py   the controller: loopback API, Twitch edge (EventSub WebSocket), action gate,
-                      whisper command link, append-only history, LM Studio probe, lifecycle, doctor
-ally.html             GitHack surface 1: operator + (later) war council
-village.html          GitHack surface 2: bigrigjay's side
-GATES.md              gate ledger: proven / simulated / pending / not built
-CONTEXT_PASS_V1.md    the architecture map (V1)
-FOUNDATION.md         authority, evidence and failure rules for the Twitch machinery
-tests/                proof harness (dev only): fake Twitch + fake LM Studio + end-to-end run, and its evidence
-var/                  created by setup.sh, never committed: config, state, history.ndjson, session key
-```
-
-## Security boundary
-
-- Controller binds **127.0.0.1 only**; every call needs the ephemeral session key; foreign Origins and
-  rebinding Host headers are refused. `./exp0 doctor` checks that nothing answers on the LAN.
-- The Twitch user token lives **only in the controller's memory**; it is never written to disk, history or
-  browser storage. Re-authorize once after each controller start.
-- Never committed: tokens, client secrets, OpenAI keys, LM Studio credentials, the session key. The public
-  Client ID is fine (Twitch treats it as public).
-- LM Studio must stay localhost-only; the controller refuses a non-loopback LM Studio URL.
-- Authority: the operator on 127.0.0.1; the opponent only by **numeric Twitch user id**. Chat is input,
-  never authority. Posting in bigrigjay's chat is locked until his permission is recorded.
-
-## Evidence
-
-```sh
-pip install aiohttp playwright && python3 tests/e2e_v1.py
-```
-
-Runs the real setup, lifecycle, controller and both pages against a fake Twitch on the real hostnames and
-writes `tests/.run/`. Last run: [`tests/EVIDENCE-e2e.txt`](tests/EVIDENCE-e2e.txt), 81 checks, 0 failed.
-Simulated Twitch proves EXP0's behavior, not Twitch's; the real gates are marked PENDING-REAL in GATES.md.
+Run the V2 harness as described in [GATES.md](GATES.md). It exercises the real controller against fake Twitch and fake LM Studio, then labels the live Twitch, browser OAuth, Debian 13 and actual Gemma checks **PENDING-REAL**. A simulated pass is never a claim that Jay's real chat or your laptop was tested here.

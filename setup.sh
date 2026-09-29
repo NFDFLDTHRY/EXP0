@@ -101,7 +101,7 @@ command -v git >/dev/null 2>&1 || warn "'git' not found: ./exp0 doctor cannot ch
 # ---- local state ---------------------------------------------------------------------------
 mkdir -p var
 chmod 700 var
-"$PY" -m py_compile controller/exp0d.py || die "controller/exp0d.py does not compile"
+"$PY" -m py_compile controller/exp0d.py controller/game.py || die "controller source does not compile"
 rm -rf controller/__pycache__
 if [ -n "$PORT" ]; then
   "$PY" controller/exp0d.py init --role "$ROLE" --port "$PORT" || die "config init failed"

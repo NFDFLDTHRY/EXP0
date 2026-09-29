@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EXP0 controller (exp0d) - V1 wiring, gates G0-G7.
+"""EXP0 controller (exp0d) - V2 single-account Twitch war game.
 
 One process. Python standard library only (3.11+). Binds 127.0.0.1 only.
 
@@ -7,10 +7,10 @@ One process. Python standard library only (3.11+). Binds 127.0.0.1 only.
   python3 controller/exp0d.py run                                foreground (what `start` launches)
   python3 controller/exp0d.py init --role all-in-one [--port N]  (called by ./setup.sh)
 
-Authority (FOUNDATION.md, CONTEXT_PASS_V1.md):
+Authority:
   operator  /v1/op/* on 127.0.0.1; bearer = ephemeral session key printed by `./exp0 start`
-  opponent  Twitch whispers whose authenticated from_user_id == the resolved numeric id of the opponent
-  chat      input only, never authority
+  commander Twitch chat events in BigRigJay's channel with his resolved numeric chatter ID
+  council   other chatters in that channel; suggestions are advisory only
 Secrets: the Twitch user token lives in this process's memory only. Nothing secret is written to disk
 except the ephemeral session key (var/session.key, mode 600, deleted on stop).
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import copy
 import hashlib
 import hmac
 import http.server
@@ -38,7 +39,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "exp0-v1.0"
+from game import help_text, initial_state, legal_view, parse_command, resolve_turn, status_text, validate_proposal
+
+VERSION = "exp0-v2.0"
 ROOT = Path(__file__).resolve().parent.parent
 VAR = Path(os.environ.get("EXP0_VAR") or (ROOT / "var"))
 CONFIG_PATH = VAR / "config.json"
@@ -55,8 +58,7 @@ TWITCH_EVENTSUB = os.environ.get("EXP0_TWITCH_EVENTSUB_URL", "wss://eventsub.wss
 ALLOWED_ORIGINS = {"https://raw.githack.com", "https://rawcdn.githack.com"}
 ALLOWED_ORIGINS |= {o.strip() for o in os.environ.get("EXP0_EXTRA_ORIGINS", "").split(",") if o.strip()}
 
-REQUIRED_SCOPES = ("user:read:chat", "user:write:chat", "user:manage:whispers")
-PROTOCOL = 1
+REQUIRED_SCOPES = ("user:read:chat", "user:write:chat")
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 DEFAULT_CONFIG = {
@@ -69,18 +71,16 @@ DEFAULT_CONFIG = {
     "self_id": None,
     "self_login": None,
     "client_id": None,
-    "permission": None,
     "ally_url": "https://raw.githack.com/NFDFLDTHRY/EXP0/main/ally.html",
     "village_url": "https://raw.githack.com/NFDFLDTHRY/EXP0/main/village.html",
     "limits": {
-        "chat_min_interval_s": 3.0,
-        "chat_max_per_min": 10,
-        "repeat_window_s": 600,
-        "whisper_min_interval_s": 1.0,
-        "whisper_max_per_min": 60,
+        "chat_min_interval_s": 1.1,
+        "chat_max_per_min": 20,
     },
 }
-DEFAULT_STATE = {"estop": False, "game": None, "seen": [], "executed": [], "whispered": []}
+DEFAULT_STATE = {"estop": False, "game": None, "seen": [], "executed": [],
+                 "council": [], "advice": [], "pending": []}
+_SECRET_TOKENS: set[str] = set()  # process memory only; guard even accidental pasted/echoed tokens
 
 
 # ----------------------------------------------------------------------------------------------- helpers
@@ -90,8 +90,14 @@ def now_iso() -> str:
 
 
 def log(msg: str) -> None:
-    sys.stderr.write(f"{now_iso()} {msg}\n")
+    sys.stderr.write(f"{now_iso()} {_redact(msg)}\n")
     sys.stderr.flush()
+
+
+def _redact(value: str) -> str:
+    for token in tuple(_SECRET_TOKENS):
+        value = value.replace(token, "[REDACTED_TOKEN]")
+    return value
 
 
 def load_json(path: Path, default):
@@ -109,7 +115,7 @@ def save_json(path: Path, obj, mode: int = 0o600) -> None:
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=1, sort_keys=True)
+        f.write(_redact(json.dumps(obj, indent=1, sort_keys=True)))
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
@@ -203,7 +209,7 @@ class History:
             rec = {"seq": self.seq, "t": now_iso(), "kind": kind, "data": data}
             if ref:
                 rec["ref"] = {k: v for k, v in ref.items() if v is not None}
-            line = json.dumps(rec, separators=(",", ":"), ensure_ascii=False) + "\n"
+            line = _redact(json.dumps(rec, separators=(",", ":"), ensure_ascii=False)) + "\n"
             try:
                 fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
                 with os.fdopen(fd, "a", encoding="utf-8") as f:
@@ -215,6 +221,13 @@ class History:
                 self.ok = False
                 log(f"HISTORY WRITE FAILED: {e}")
             return self.seq
+
+    def required(self, kind: str, data: dict, ref: dict | None = None) -> int:
+        """Evidence for a state change must be durably appended or the action fails closed."""
+        seq = self.append(kind, data, ref)
+        if not self.ok:
+            raise OSError("append-only evidence unavailable")
+        return seq
 
     def tail(self, after: int = 0, limit: int = 200) -> list:
         with self.lock:
@@ -514,6 +527,7 @@ class Edge:
             with c.lock:
                 c.tests["eventsub"] = {"ok": True, "at": now_iso(), "session_id": self.session_id,
                                        "subs": {k: s.get("status") for k, s in self.subs.items()}}
+                c.work_cv.notify_all()
             while not self.stop_evt.is_set():
                 tok = c.token
                 if not tok or not tok.get("valid"):
@@ -534,7 +548,12 @@ class Edge:
                 if t == "session_keepalive":
                     continue
                 if t == "notification":
-                    c.on_notification(msg)
+                    try:
+                        c.on_notification(msg)
+                    except Exception as ex:
+                        c.hist.append("error", {"op": "notification_rejected",
+                                                "error": f"{type(ex).__name__}: {ex}"[:200],
+                                                "message_id": (msg.get("metadata") or {}).get("message_id")})
                 elif t == "session_reconnect":
                     ws = self._reconnect(ws, msg)
                 elif t == "revocation":
@@ -556,13 +575,8 @@ class Edge:
         c = self.c
         tok = c.token or {}
         me = tok.get("user_id")
-        scopes = tok.get("scopes") or []
-        wanted = [("own_chat", "channel.chat.message", {"broadcaster_user_id": me, "user_id": me})]
         opp = c.config.get("opponent_id")
-        if opp and opp != me:
-            wanted.append(("opponent_chat", "channel.chat.message", {"broadcaster_user_id": opp, "user_id": me}))
-        if "user:manage:whispers" in scopes or "user:read:whispers" in scopes:
-            wanted.append(("whispers", "user.whisper.message", {"user_id": me}))
+        wanted = [("opponent_chat", "channel.chat.message", {"broadcaster_user_id": opp, "user_id": me})]
         subs = {}
         for key, typ, cond in wanted:
             body = {"type": typ, "version": "1", "condition": cond,
@@ -594,7 +608,11 @@ class Edge:
             except ValueError:
                 continue
             if (om.get("metadata") or {}).get("message_type") == "notification":
-                c.on_notification(om)
+                try:
+                    c.on_notification(om)
+                except Exception as ex:
+                    c.hist.append("error", {"op": "reconnect_notification_rejected",
+                                            "error": f"{type(ex).__name__}: {ex}"[:200]})
         old.close(1000, "reconnected")
         self.ws = new
         self.session_id = w["id"]
@@ -611,16 +629,25 @@ class Controller:
         os.chmod(VAR, 0o700)
         self.lock = threading.RLock()
         self.config = merged(DEFAULT_CONFIG, load_json(CONFIG_PATH, {}))
+        # Drop V1's private commander/permission settings from persisted config.
+        legacy = "permission" in self.config
+        self.config.pop("permission", None)
+        limits = self.config["limits"]
+        for old_key in ("whisper_min_interval_s", "whisper_max_per_min", "repeat_window_s"):
+            legacy = old_key in limits or legacy
+            limits.pop(old_key, None)
+        if limits.get("chat_min_interval_s") == 3.0 and limits.get("chat_max_per_min") == 10:
+            limits["chat_min_interval_s"], limits["chat_max_per_min"] = 1.1, 20
+            legacy = True
+        if legacy:
+            save_json(CONFIG_PATH, self.config)
         self.state = merged(DEFAULT_STATE, load_json(STATE_PATH, {}))
         self.hist = History(HISTORY_PATH)
         self.key = secrets.token_urlsafe(32)
         self.token: dict | None = None
         self.seen = collections.OrderedDict((k, True) for k in self.state.get("seen") or [])
         self.executed = collections.OrderedDict((k, True) for k in self.state.get("executed") or [])
-        self.whispered = set(self.state.get("whispered") or [])
         self.chat_times: collections.deque = collections.deque()
-        self.recent_texts: collections.deque = collections.deque()
-        self.whisper_times: collections.deque = collections.deque()
         self.pending_echo: dict = {}
         self.self_seen: collections.OrderedDict = collections.OrderedDict()
         self.recent_chat: collections.deque = collections.deque(maxlen=12)
@@ -630,25 +657,32 @@ class Controller:
         self.dirty = False
         self.started = time.time()
         self.stopping = threading.Event()
-        self.wq: collections.deque = collections.deque()
-        self.wq_cv = threading.Condition()
+        self.work_cv = threading.Condition(self.lock)
+        self.outbound_cv = threading.Condition(self.lock)
+        self.outbound: collections.deque = collections.deque()
+        self.outbound_epoch = 0
         self.edge = Edge(self)
-        threading.Thread(target=self._whisper_pump, name="whisper-pump", daemon=True).start()
+        # V1 game sessions had whisper sequence data, not a canonical world.
+        if self.state.get("game") and not isinstance(self.state["game"].get("world"), dict):
+            self.state["game"] = None
+            self.state["pending"] = []
+            self.save_state_locked()
+            self.hist.append("control", {"op": "v1_session_retired", "reason": "V2 uses chat and a canonical world"})
+        threading.Thread(target=self._game_pump, name="game-pump", daemon=True).start()
+        threading.Thread(target=self._outbound_pump, name="chat-pump", daemon=True).start()
         threading.Thread(target=self._housekeeping, name="housekeeping", daemon=True).start()
         self.hist.append("control", {"op": "controller_start", "version": VERSION, "role": self.config["role"],
                                      "pid": os.getpid(), "estop": bool(self.state.get("estop")),
-                                     "game": (self.state.get("game") or {}).get("sid"),
+                                     "game_version": ((self.state.get("game") or {}).get("world") or {}).get("version"),
                                      "note": "Twitch token is memory-only: authorize again in ally.html after every start"})
 
     # ---- persistence
     def save_state_locked(self) -> None:
-        while len(self.seen) > 5000:
-            self.seen.popitem(last=False)
-        while len(self.executed) > 2000:
+        # Message IDs are the durable replay barrier; do not expire them.
+        while len(self.executed) > 5000:
             self.executed.popitem(last=False)
         self.state["seen"] = list(self.seen.keys())
         self.state["executed"] = list(self.executed.keys())
-        self.state["whispered"] = sorted(self.whispered)
         save_json(STATE_PATH, self.state)
         self.dirty = False
 
@@ -668,20 +702,23 @@ class Controller:
 
     def close(self) -> None:
         self.stopping.set()
-        with self.wq_cv:
-            self.wq_cv.notify_all()
+        with self.work_cv:
+            self.work_cv.notify_all()
+        with self.outbound_cv:
+            self.outbound_cv.notify_all()
         self.edge.stop()
         with self.lock:
             self.save_state_locked()
 
-    def mark_seen(self, *keys: str) -> bool:
+    def mark_seen(self, *keys: str, durable: bool = True) -> bool:
         keys = tuple(k for k in keys if k and not k.endswith(":"))
         with self.lock:
             if any(k in self.seen for k in keys):
                 return False
             for k in keys:
                 self.seen[k] = True
-            self.dirty = True
+            if durable:
+                self.save_state_locked()
             return True
 
     # ---- twitch auth
@@ -782,6 +819,7 @@ class Controller:
             self.token = {"access_token": access_token, "login": v.get("login"), "user_id": v.get("user_id"),
                           "client_id": v.get("client_id"), "scopes": v.get("scopes") or [],
                           "expires_in": v.get("expires_in"), "validated_at": time.time(), "valid": True}
+            _SECRET_TOKENS.add(access_token)
             self.save_config()
         pub = self.twitch_public()
         self.hist.append("control", {"op": "token_accepted", "login": pub["login"], "user_id": pub["user_id"],
@@ -798,6 +836,8 @@ class Controller:
                                   form={"client_id": tok["client_id"], "token": tok["access_token"]})
         with self.lock:
             self.token = None
+            self.outbound_epoch += 1
+            self.outbound.clear()
         self.hist.append("control", {"op": "token_forgotten", "revoked_at_twitch": bool(revoke), "http": status})
         return {"forgotten": True, "revoke_http": status}
 
@@ -812,6 +852,7 @@ class Controller:
             self.config["self_id"] = t["user_id"]
             self.config["self_login"] = t["login"]
             self.save_config()
+            self._ensure_game_locked()
         self.hist.append("control", {"op": "identity_confirmed", "user_id": t["user_id"], "login": t["login"],
                                      "meaning": "this account is the public voice of the Gemma civilization"})
         return {"self_id": t["user_id"], "self_login": t["login"]}
@@ -833,12 +874,17 @@ class Controller:
         with self.lock:
             prev = self.config.get("opponent_id")
             self.config.update(opponent_login=u["login"], opponent_id=u["id"], opponent_display=u.get("display_name"))
+            if prev != u["id"]:
+                self.outbound_epoch += 1
+                self.outbound.clear()
             g = self.state.get("game")
             if g and g.get("opponent_id") != u["id"]:
-                self.hist.append("control", {"op": "game_invalidated", "why": "opponent changed", "sid": g["sid"]})
+                self.hist.append("control", {"op": "game_invalidated", "why": "opponent changed"})
                 self.state["game"] = None
+                self.state["pending"] = []
                 self.save_state_locked()
             self.save_config()
+            self._ensure_game_locked()
         self.hist.append("control", {"op": "opponent_resolved", "login": u["login"], "id": u["id"],
                                      "display_name": u.get("display_name"), "previous_id": prev,
                                      "note": "authority = this numeric id, never the display name"})
@@ -847,26 +893,15 @@ class Controller:
             self.edge.start()
         return {"login": u["login"], "id": u["id"], "display_name": u.get("display_name")}
 
-    def set_permission(self, granted: bool, statement: str) -> dict:
-        statement = statement.strip()[:1000]
-        if granted and len(statement) < 8:
-            raise ApiError(400, "statement_required")
-        rec = {"granted": bool(granted), "statement": statement, "channel_login": self.config.get("opponent_login"),
-               "recorded_at": now_iso()}
-        with self.lock:
-            self.config["permission"] = rec
-            self.save_config()
-        self.hist.append("control", {"op": "permission_recorded" if granted else "permission_withdrawn", **rec})
-        return rec
-
     def set_estop(self, on: bool) -> dict:
         with self.lock:
             self.state["estop"] = bool(on)
             dropped = 0
             if on:
-                with self.wq_cv:
-                    dropped = len(self.wq)
-                    self.wq.clear()
+                self.outbound_epoch += 1
+                dropped = len(self.outbound) + len(self.state.get("pending") or [])
+                self.outbound.clear()
+                self.state["pending"] = []
             self.save_state_locked()
         self.hist.append("control", {"op": "emergency_stop" if on else "emergency_stop_cleared",
                                      **({"pending_discarded": dropped} if on else {})})
@@ -879,6 +914,11 @@ class Controller:
                 raise ApiError(409, "no_valid_token")
             if self.config.get("self_id") != t.get("user_id"):
                 raise ApiError(409, "identity_not_confirmed")
+            if any(scope not in (t.get("scopes") or []) for scope in REQUIRED_SCOPES):
+                raise ApiError(409, "missing_chat_scopes")
+            if not self.config.get("opponent_id"):
+                raise ApiError(409, "opponent_not_resolved")
+            self._ensure_game_locked()
         return {"started": self.edge.start()}
 
     def edge_stop(self) -> dict:
@@ -886,148 +926,128 @@ class Controller:
         self.hist.append("control", {"op": "edge_stop_by_operator"})
         return {"stopped": True}
 
-    # ---- inbound: TWITCH BOUNDARY -> normalized events
+    # ---- inbound: Twitch EventSub -> durable chat events -> bounded commands
     def on_notification(self, msg: dict) -> None:
         md = msg.get("metadata") or {}
         p = msg.get("payload") or {}
-        st = md.get("subscription_type")
-        if st == "channel.chat.message":
+        if md.get("subscription_type") == "channel.chat.message":
             self.on_chat(md, p.get("event") or {})
-        elif st == "user.whisper.message":
-            self.on_whisper(md, p.get("event") or {})
         else:
-            self.hist.append("error", {"op": "unknown_input", "subscription_type": st, "note": "logged and ignored"})
+            self.hist.append("error", {"op": "unknown_input", "subscription_type": md.get("subscription_type")})
 
     def on_chat(self, md: dict, e: dict) -> None:
         cfg = self.config
         me = (self.token or {}).get("user_id")
-        ch = e.get("broadcaster_user_id")
+        ch = str(e.get("broadcaster_user_id") or "")
         m = e.get("message") or {}
-        ev = {"event_id": md.get("message_id"), "timestamp": md.get("message_timestamp"), "channel_id": ch,
+        mid = str(e.get("message_id") or "")
+        eid = str(md.get("message_id") or "")
+        if not mid and not eid:
+            self.hist.append("error", {"op": "chat_without_id", "note": "refused; cannot deduplicate"})
+            return
+        body = m.get("text") if isinstance(m.get("text"), str) else ""
+        # A token pasted into chat must not appear in our evidence file.
+        secret = (self.token or {}).get("access_token")
+        if secret:
+            body = body.replace(secret, "[REDACTED_TOKEN]")
+        ev = {"event_id": eid, "timestamp": md.get("message_timestamp"), "channel_id": ch,
               "channel_login": e.get("broadcaster_user_login"),
-              "channel_role": "own" if ch == me else ("opponent" if ch == cfg.get("opponent_id") else "other"),
-              "message_id": e.get("message_id"), "chatter_id": e.get("chatter_user_id"),
+              "channel_role": "opponent" if ch == cfg.get("opponent_id") else "other",
+              "message_id": mid, "chatter_id": str(e.get("chatter_user_id") or ""),
               "chatter_name": e.get("chatter_user_name"), "chatter_login": e.get("chatter_user_login"),
-              "text": m.get("text") if isinstance(m.get("text"), str) else "",
-              "structured_message_data": {"message_type": e.get("message_type"), "fragments": m.get("fragments") or [],
-                                          "badges": e.get("badges") or [], "cheer": e.get("cheer"),
-                                          "source_broadcaster_user_id": e.get("source_broadcaster_user_id")},
-              "reply_context": e.get("reply"), "is_self": bool(me) and e.get("chatter_user_id") == me,
+              "text": body[:500], "is_self": bool(me) and str(e.get("chatter_user_id")) == str(me),
               "source": "twitch"}
-        if not self.mark_seen("ws:" + str(ev["event_id"] or ""), "chat:" + str(ev["message_id"] or "")):
-            self.hist.append("event", {"duplicate": True, "dropped": True, "event_id": ev["event_id"],
-                                       "message_id": ev["message_id"]})
-            return
-        seq = self.hist.append("event", ev, {"event_id": ev["event_id"], "message_id": ev["message_id"]})
+        ref = {"event_id": eid or None, "message_id": mid or None}
         with self.lock:
-            self.recent_chat.append({"seq": seq, "t": ev["timestamp"], "channel_role": ev["channel_role"],
-                                     "channel_login": ev["channel_login"], "chatter": ev["chatter_name"],
-                                     "text": ev["text"][:300], "is_self": ev["is_self"]})
-            if not (self.tests.get("chat_read") or {}).get("ok"):
-                self.tests["chat_read"] = {"ok": True, "seq": seq, "at": now_iso(), "channel_role": ev["channel_role"],
-                                           "channel_login": ev["channel_login"], "chatter": ev["chatter_name"],
-                                           "text": ev["text"][:200]}
-            if ev["is_self"] and ev["message_id"]:
-                self.self_seen[ev["message_id"]] = (ev["event_id"], seq)
-                while len(self.self_seen) > 200:
-                    self.self_seen.popitem(last=False)
-                pend = self.pending_echo.pop(ev["message_id"], None)
-                if pend:
-                    self._confirm_echo_locked(pend[0], pend[1], ev["message_id"], (ev["event_id"], seq))
-
-    # ---- inbound: private command bus (Twitch whispers from the opponent)
-    def on_whisper(self, md: dict, e: dict) -> None:
-        wid = e.get("whisper_id")
-        text = (e.get("whisper") or {}).get("text") or ""
-        if not self.mark_seen("ws:" + str(md.get("message_id") or ""), "whisper:" + str(wid or "")):
-            self.hist.append("command", {"duplicate_delivery": True, "dropped": True, "whisper_id": wid})
-            return
-        frm = e.get("from_user_id")
-        ref = {"whisper_id": wid}
-        self.hist.append("command", {"whisper_id": wid, "from_user_id": frm, "from_user_login": e.get("from_user_login"),
-                                     "from_user_name": e.get("from_user_name"), "to_user_id": e.get("to_user_id"),
-                                     "text": text[:1000]}, ref)
-        reply = None
-        with self.lock:
-            game = self.state.get("game")
-
-            def decide(admitted: bool, **kw):
-                self.hist.append("admission", {"whisper_id": wid, "admitted": admitted, **kw}, ref)
-                self.recent_commands.append({"t": now_iso(), "from": e.get("from_user_login"), "admitted": admitted,
-                                             **{k: kw[k] for k in ("seq", "type", "reasons") if k in kw}})
-
-            if self.state.get("estop"):
-                decide(False, reasons=["emergency_stop"], note="not applied, not answered; the sender retries after clear")
+            if not self.mark_seen(*[k for k in ("ws:" + eid if eid else "", "chat:" + mid if mid else "") if k], durable=False):
+                self.hist.append("event", {"duplicate": True, "dropped": True, **ref}, ref)
                 return
-            if not game:
-                decide(False, reasons=["no_game_session"], note="ignored, no reply")
-                return
-            if frm != game["opponent_id"]:
-                decide(False, reasons=["unauthorized_sender"], claimed_name=e.get("from_user_name"),
-                       note="authority is the authenticated numeric user id; display names are ignored; no reply")
-                return
-            try:
-                env = json.loads(text)
-            except ValueError:
-                env = None
-            base = {"exp0": PROTOCOL, "sid": game["sid"]}
-            if not isinstance(env, dict) or env.get("exp0") != PROTOCOL:
-                decide(False, reasons=["malformed_or_wrong_protocol"])
-                reply = {**base, "ack": None, "ok": False, "error": "malformed_or_wrong_protocol"}
-            elif env.get("sid") != game["sid"]:
-                decide(False, reasons=["wrong_session"], got_sid=str(env.get("sid"))[:40])
-                reply = {**base, "sid": str(env.get("sid"))[:40], "ack": env.get("seq"), "ok": False,
-                         "error": "wrong_session"}
-            else:
-                seq, typ, last = env.get("seq"), env.get("type"), game["last_seq"]
-                if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
-                    decide(False, reasons=["bad_seq"])
-                    reply = {**base, "ack": None, "ok": False, "error": "bad_seq"}
-                elif seq == 0:
-                    first = not game.get("joined")
-                    if first:
-                        game["joined"] = {"at": now_iso(), "login": e.get("from_user_login"), "whisper_id": wid}
+            seq = self.hist.required("event", ev, ref)
+            with self.lock:
+                self.recent_chat.append({"seq": seq, "t": ev["timestamp"], "channel_role": ev["channel_role"],
+                                         "channel_login": ev["channel_login"], "chatter": ev["chatter_name"],
+                                         "text": ev["text"][:300], "is_self": ev["is_self"]})
+                if ch == cfg.get("opponent_id") and not (self.tests.get("chat_read") or {}).get("ok"):
+                    self.tests["chat_read"] = {"ok": True, "seq": seq, "at": now_iso(), "channel_role": "opponent",
+                                               "channel_login": ev["channel_login"], "chatter": ev["chatter_name"],
+                                               "text": ev["text"][:200]}
+                if ev["is_self"] and mid:
+                    self.self_seen[mid] = (eid, seq)
+                    while len(self.self_seen) > 200:
+                        self.self_seen.popitem(last=False)
+                    pend = self.pending_echo.pop(mid, None)
+                    if pend:
+                        self._confirm_echo_locked(pend[0], pend[1], mid, (eid, seq))
+                if ch != cfg.get("opponent_id") or ev["is_self"]:
                     self.save_state_locked()
-                    decide(True, seq=0, type="sync", first_join=first)
-                    if first:
-                        self.hist.append("control", {"op": "opponent_joined", "sid": game["sid"], "user_id": frm,
-                                                     "login": e.get("from_user_login")}, ref)
-                    reply = {**base, "ack": 0, "ok": True, "joined": True, "expect": last + 1}
-                elif seq <= last:
-                    cached = game["responses"].get(str(seq))
-                    decide(False, seq=seq, type=typ, reasons=["duplicate_sequence"], last_seq=last,
-                           note="not re-applied; cached ACK re-sent")
-                    reply = dict(cached) if cached else {**base, "ack": seq, "ok": True}
-                    reply["dup"] = True
-                elif seq > last + 1:
-                    decide(False, seq=seq, type=typ, reasons=["sequence_gap"], expect=last + 1)
-                    reply = {**base, "ack": seq, "ok": False, "error": "sequence_gap", "expect": last + 1}
-                else:
-                    result = self.apply_command(typ, env.get("payload"))
-                    ok = "error" not in result
-                    game["last_seq"] = seq
-                    resp = {**base, "ack": seq, "ok": ok}
-                    resp.update({"result": result} if ok else {"error": result["error"]})
-                    game["responses"][str(seq)] = resp
-                    while len(game["responses"]) > 64:
-                        del game["responses"][min(game["responses"], key=int)]
-                    self.save_state_locked()  # persisted BEFORE the ACK leaves: a retry can never re-apply
-                    decide(True, seq=seq, type=typ)
-                    self.hist.append("applied", {"sid": game["sid"], "seq": seq, "type": typ, "ok": ok,
-                                                 "result": result}, ref)
-                    reply = resp
-        if reply is not None:
-            self.queue_whisper(frm, reply, wid)
+                    return
+                if self.state.get("estop"):
+                    self.hist.required("admission", {"message_id": mid, "admitted": False,
+                                                     "reasons": ["emergency_stop"]}, ref)
+                    self.save_state_locked()
+                    return
+                text = body.strip()
+                lower = text.lower()
+                is_commander = ev["chatter_id"] == str(cfg.get("opponent_id") or "")
+                if lower in ("!help", "!status"):
+                    world = (self.state.get("game") or {}).get("world")
+                    reply = help_text() if lower == "!help" else (
+                        status_text(world) if world else "EXP0 is awaiting its first world. The operator should finish setup.")
+                    self.hist.required("command", {"message_id": mid, "role": "commander" if is_commander else "council",
+                                                   "type": lower[1:], "admitted": True}, ref)
+                    self.save_state_locked()
+                    self._enqueue_chat(reply, "reply:" + (mid or eid), "reply to " + lower)
+                    return
+                if is_commander and lower.startswith("!do"):
+                    try:
+                        command = parse_command(text)
+                    except ValueError as ex:
+                        self.hist.required("admission", {"message_id": mid, "admitted": False,
+                                                         "reasons": ["illegal_commander_command"], "detail": str(ex)[:150]}, ref)
+                        self.save_state_locked()
+                        self._enqueue_chat("That order is unclear. " + help_text(), "error:" + (mid or eid),
+                                           "invalid commander syntax")
+                        return
+                    if command is None:
+                        self.save_state_locked()
+                        return
+                    game = self._ensure_game_locked()
+                    if not game:
+                        self.hist.required("admission", {"message_id": mid, "admitted": False,
+                                                         "reasons": ["setup_incomplete"]}, ref)
+                        self.save_state_locked()
+                        self._enqueue_chat("EXP0 needs the operator to finish setup.", "setup:" + (mid or eid),
+                                           "setup incomplete")
+                        return
+                    item = {"message_id": mid or eid, "chatter_id": ev["chatter_id"], "command": command,
+                            "received_at": now_iso()}
+                    self.hist.required("command", {"message_id": item["message_id"], "role": "commander",
+                                                   "admitted": True, **command}, ref)
+                    self.state["pending"].append(item)
+                    self.save_state_locked()
+                    self.recent_commands.append({"t": now_iso(), "from": ev["chatter_login"],
+                                                 "admitted": True, "action": command["action"], "message_id": mid})
+                    self.work_cv.notify_all()
+                    return
+                if not is_commander and lower.startswith("!suggest"):
+                    suggestion = text[len("!suggest"):].strip()[:200]
+                    if suggestion:
+                        entry = {"t": now_iso(), "chatter": ev["chatter_login"] or ev["chatter_name"],
+                                 "chatter_id": ev["chatter_id"], "text": suggestion, "message_id": mid or eid}
+                        self.hist.required("council", entry, ref)
+                        self.state["council"] = (self.state.get("council") or [])[-11:] + [entry]
+                    self.save_state_locked()
+                    return
+                if text.startswith("!"):
+                    self.hist.append("admission", {"message_id": mid, "admitted": False,
+                                                   "reasons": ["unknown_command"],
+                                                   "role": "commander" if is_commander else "council"}, ref)
+                self.save_state_locked()
 
-    def apply_command(self, typ, payload) -> dict:
-        if typ == "ping":
-            return {"pong": True, "t": now_iso()}
-        return {"error": "unknown_type"}
-
-    # ---- outbound: ACTION GATE + TWITCH SENDER
+    # ---- outbound: audited Twitch sender; outgoing chat is intentionally not replayed after restart
     def gate_chat(self, p: dict) -> list:
         r = []
-        cfg, L, tok = self.config, self.config["limits"], self.token
+        cfg, tok = self.config, self.token
         if self.state.get("estop"):
             r.append("emergency_stop")
         if not tok or not tok.get("valid"):
@@ -1042,70 +1062,66 @@ class Controller:
             r.append("history_unavailable")
         if p["channel"] not in ("self", "opponent") or not p.get("broadcaster_id"):
             r.append("wrong_channel")
-        if p["channel"] == "opponent" and not (cfg.get("permission") or {}).get("granted"):
-            r.append("no_streamer_permission")
         m = p.get("message")
         if not isinstance(m, str) or not m.strip() or len(m) > 500 or re.search(r"[\x00-\x1f\x7f]", m):
             r.append("invalid_message")
         if p["source_key"] in self.executed:
             r.append("already_executed")
         now = time.time()
-        while self.chat_times and now - self.chat_times[0] > 60:
+        while self.chat_times and now - self.chat_times[0] > 30:
             self.chat_times.popleft()
-        if self.chat_times and now - self.chat_times[-1] < L["chat_min_interval_s"]:
+        if self.chat_times and now - self.chat_times[-1] < max(1.1, float(cfg["limits"]["chat_min_interval_s"])):
             r.append("rate_min_interval")
-        if len(self.chat_times) >= L["chat_max_per_min"]:
-            r.append("rate_per_minute")
-        while self.recent_texts and now - self.recent_texts[0][2] > L["repeat_window_s"]:
-            self.recent_texts.popleft()
-        norm = m.strip().lower() if isinstance(m, str) else ""
-        if any(c == p["channel"] and t == norm for c, t, _ in self.recent_texts):
-            r.append("repetition")
+        if len(self.chat_times) >= min(20, int(cfg["limits"]["chat_max_per_min"])):
+            r.append("rate_per_30s")
         return r
 
     def propose_chat(self, source: str, channel: str, message: str, reason: str, source_key: str,
-                     test_slot: str | None = None) -> dict:
+                     test_slot: str | None = None, expected_epoch: int | None = None) -> dict:
+        message = _redact(message)
         pid = "p-" + secrets.token_hex(6)
         with self.lock:
             cfg, tok = self.config, self.token
             bid = cfg.get("self_id") if channel == "self" else cfg.get("opponent_id") if channel == "opponent" else None
             p = {"proposal_id": pid, "source": source, "action_type": "chat", "channel": channel,
                  "broadcaster_id": bid, "message": message, "reason": reason, "source_key": source_key}
-            self.hist.append("proposal", p, {"proposal_id": pid})
+            self.hist.required("proposal", p, {"proposal_id": pid})
             reasons = self.gate_chat(p)
-            self.hist.append("admission", {"proposal_id": pid, "admitted": not reasons, "reasons": reasons},
-                             {"proposal_id": pid})
+            if expected_epoch is not None and expected_epoch != self.outbound_epoch:
+                reasons.append("outbound_canceled")
+            self.hist.required("admission", {"proposal_id": pid, "admitted": not reasons, "reasons": reasons},
+                               {"proposal_id": pid})
             if reasons:
                 if test_slot:
                     self.tests[test_slot] = {"ok": False, "at": now_iso(), "target": channel, "text": message,
                                              "admitted": False, "reasons": reasons}
                 return {"proposal_id": pid, "admitted": False, "reasons": reasons}
             self.executed[source_key] = True
-            now = time.time()
-            self.chat_times.append(now)
-            self.recent_texts.append((channel, message.strip().lower(), now))
-            self.save_state_locked()  # executed before the network call: a crash can't cause a resend
-        body = {"broadcaster_id": bid, "sender_id": tok["user_id"], "message": message}
-        self.hist.append("action", {"proposal_id": pid, "method": "POST", "url": TWITCH_HELIX + "/chat/messages",
-                                    "body": body}, {"proposal_id": pid})
-        st, b = self.helix("POST", "/chat/messages", body)
-        d = b.get("data")[0] if isinstance(b.get("data"), list) and b.get("data") else {}
-        res = {"proposal_id": pid, "http": st, "message_id": d.get("message_id"), "is_sent": d.get("is_sent"),
-               "drop_reason": d.get("drop_reason"), "error": None if st == 200 else (b.get("message") or b.get("error"))}
-        self.hist.append("result", res, {"proposal_id": pid})
-        with self.lock:
-            if test_slot:
-                self.tests[test_slot] = {"ok": False, "at": now_iso(), "target": channel, "text": message,
-                                         "admitted": True, "http": st, "is_sent": d.get("is_sent"),
-                                         "message_id": d.get("message_id"), "drop_reason": d.get("drop_reason"),
-                                         "error": res["error"], "echo": False}
-            mid = d.get("message_id")
-            if d.get("is_sent") and mid:
-                if mid in self.self_seen:  # the echo outran the HTTP response
-                    self._confirm_echo_locked(pid, test_slot, mid, self.self_seen[mid])
-                else:
-                    self.pending_echo[mid] = (pid, test_slot)
-        return {"admitted": True, **res}
+            self.chat_times.append(time.time())
+            self.save_state_locked()  # claim the send before network I/O; never resend after a crash
+            body = {"broadcaster_id": bid, "sender_id": tok["user_id"], "message": message}
+            self.hist.required("action", {"proposal_id": pid, "method": "POST", "url": TWITCH_HELIX + "/chat/messages",
+                                          "body": body}, {"proposal_id": pid})
+            st, b = self.helix("POST", "/chat/messages", body)
+            d = b.get("data")[0] if isinstance(b.get("data"), list) and b.get("data") else {}
+            res = {"proposal_id": pid, "http": st, "message_id": d.get("message_id"), "is_sent": d.get("is_sent"),
+                   "drop_reason": d.get("drop_reason"), "error": None if st == 200 else (b.get("message") or b.get("error"))}
+            self.hist.append("result", res, {"proposal_id": pid})
+            with self.lock:
+                if test_slot:
+                    self.tests[test_slot] = {"ok": bool(d.get("is_sent")) if channel == "self" else False,
+                                             "at": now_iso(), "target": channel, "text": message,
+                                             "admitted": True, "http": st, "is_sent": d.get("is_sent"),
+                                             "message_id": d.get("message_id"), "drop_reason": d.get("drop_reason"),
+                                             "error": res["error"], "echo": False,
+                                             "echo_available": channel == "opponent"}
+                mid = d.get("message_id")
+                if d.get("is_sent") and mid:
+                    if mid in self.self_seen:
+                        self._confirm_echo_locked(pid, test_slot, mid, self.self_seen[mid])
+                    elif channel == "opponent":
+                        self.pending_echo[mid] = (pid, test_slot)
+            return {"admitted": True, **res}
 
     def _confirm_echo_locked(self, pid: str, slot, mid: str, evt: tuple) -> None:
         self.hist.append("result", {"proposal_id": pid, "confirmed_by_event": evt[0], "event_seq": evt[1],
@@ -1118,110 +1134,317 @@ class Controller:
         if target not in ("self", "opponent"):
             raise ApiError(400, "bad_target")
         msg = f"EXP0 TEST {time.strftime('%H:%M:%S', time.gmtime())}Z #{secrets.token_hex(2)} (wiring test)"
-        return self.propose_chat("operator_test", target, msg, "operator pressed 'send TEST message'",
+        return self.propose_chat("operator_test", target, msg, "operator pressed send TEST message",
                                  "test:" + secrets.token_hex(8), test_slot="chat_send")
 
-    def queue_whisper(self, to_user_id: str, obj: dict, cause) -> None:
-        with self.wq_cv:
-            self.wq.append({"to": to_user_id, "message": json.dumps(obj, separators=(",", ":")), "cause": cause})
-            self.wq_cv.notify()
+    def _enqueue_chat(self, message: str, source_key: str, reason: str) -> None:
+        if self.state.get("estop"):
+            return
+        with self.outbound_cv:
+            priority = source_key.startswith(("turn:", "refusal:", "skip:", "error:"))
+            item = {"message": message[:500], "source_key": source_key, "reason": reason,
+                    "epoch": self.outbound_epoch, "priority": priority}
+            if reason == "reply to !status":
+                kept = [x for x in self.outbound if x["reason"] != reason]
+                if len(kept) != len(self.outbound):
+                    self.hist.append("result", {"op": "chat_queue_coalesced", "reason": reason,
+                                                "count": len(self.outbound) - len(kept)})
+                self.outbound = collections.deque(kept)
+            if len(self.outbound) >= 64:
+                oldest_routine = next((x for x in self.outbound if not x["priority"]), None)
+                if oldest_routine is None:
+                    self.hist.append("result", {"op": "chat_queue_dropped", "source_key": source_key,
+                                                "reason": "priority_queue_full"})
+                    return
+                self.outbound.remove(oldest_routine)
+                self.hist.append("result", {"op": "chat_queue_dropped", "source_key": oldest_routine["source_key"],
+                                            "reason": "queue_full"})
+            if priority:
+                index = next((i for i, x in enumerate(self.outbound) if not x["priority"]), len(self.outbound))
+                self.outbound.insert(index, item)
+            else:
+                self.outbound.append(item)
+            self.outbound_cv.notify_all()
 
-    def _whisper_pump(self) -> None:
+    def _outbound_pump(self) -> None:
         while not self.stopping.is_set():
-            with self.wq_cv:
-                while not self.wq and not self.stopping.is_set():
-                    self.wq_cv.wait(1.0)
+            with self.outbound_cv:
+                while not self.outbound and not self.stopping.is_set():
+                    self.outbound_cv.wait(1.0)
                 if self.stopping.is_set():
                     return
-            L, now = self.config["limits"], time.time()
-            while self.whisper_times and now - self.whisper_times[0] > 60:
-                self.whisper_times.popleft()
-            wait = 0.0
-            if self.whisper_times:
-                wait = max(wait, L["whisper_min_interval_s"] - (now - self.whisper_times[-1]))
-            if len(self.whisper_times) >= L["whisper_max_per_min"]:
-                wait = max(wait, 60 - (now - self.whisper_times[0]))
-            if wait > 0:
-                time.sleep(min(wait, 1.0))
-                continue
-            with self.wq_cv:
-                if not self.wq:
+                item = self.outbound.popleft()
+            while not self.stopping.is_set():
+                with self.lock:
+                    if self.state.get("estop") or item["epoch"] != self.outbound_epoch:
+                        break
+                    if not item["priority"]:
+                        urgent = next((x for x in self.outbound if x["priority"]), None)
+                        if urgent:
+                            self.outbound.remove(urgent)
+                            self.hist.append("result", {"op": "chat_queue_dropped", "source_key": item["source_key"],
+                                                        "reason": "superseded_by_commander_result"})
+                            item = urgent
+                    ready = self.edge.connected and bool((self.token or {}).get("valid"))
+                if not ready:
+                    self.stopping.wait(1.0)
                     continue
-                item = self.wq.popleft()
-            try:
-                self._send_whisper(item)
-            except Exception as ex:  # a failed send must never kill the pump
-                self.hist.append("error", {"op": "whisper_send_exception", "error": f"{type(ex).__name__}: {ex}"})
+                try:
+                    result = self.propose_chat("game", "opponent", item["message"], item["reason"],
+                                               item["source_key"], expected_epoch=item["epoch"])
+                except Exception as ex:
+                    self.hist.append("error", {"op": "chat_send_exception", "error": f"{type(ex).__name__}: {ex}"})
+                    break
+                reasons = result.get("reasons") or []
+                if not reasons:
+                    if result.get("admitted") and result.get("is_sent") is not True:
+                        self.hist.append("result", {"op": "chat_undelivered", "source_key": item["source_key"],
+                                                    "http": result.get("http"),
+                                                    "drop_reason": result.get("drop_reason"),
+                                                    "error": result.get("error")})
+                    break
+                if set(reasons) <= {"rate_min_interval", "rate_per_30s", "connection_invalid", "auth_invalid"}:
+                    self.stopping.wait(1.1)
+                    continue
+                self.hist.append("result", {"op": "chat_dropped", "source_key": item["source_key"],
+                                            "reasons": reasons})
+                break
 
-    def _send_whisper(self, item: dict) -> None:
-        pid = "w-" + secrets.token_hex(6)
-        to, msg = item["to"], item["message"]
-        ref = {"proposal_id": pid, "whisper_id": item.get("cause")}
-        with self.lock:
-            tok, game = self.token, self.state.get("game")
-            self.hist.append("proposal", {"proposal_id": pid, "source": "command_bus", "action_type": "whisper",
-                                          "to_user_id": to, "message": msg,
-                                          "reason": f"reply to whisper {item.get('cause')}"}, ref)
-            r = []
-            if self.state.get("estop"):
-                r.append("emergency_stop")
-            if not tok or not tok.get("valid"):
-                r.append("auth_invalid")
-            elif "user:manage:whispers" not in (tok.get("scopes") or []):
-                r.append("missing_scope:user:manage:whispers")
-            if not game or to != game.get("opponent_id"):
-                r.append("recipient_is_not_the_opponent")
-            limit = 10000 if to in self.whispered else 500
-            if len(msg) > limit:
-                r.append(f"too_long_for_recipient:{limit}")
-            if not self.hist.ok:
-                r.append("history_unavailable")
-            self.hist.append("admission", {"proposal_id": pid, "admitted": not r, "reasons": r}, ref)
-            if r:
-                return
-            self.whisper_times.append(time.time())
-        path = f"/whispers?from_user_id={urllib.parse.quote(tok['user_id'])}&to_user_id={urllib.parse.quote(to)}"
-        self.hist.append("action", {"proposal_id": pid, "method": "POST", "url": TWITCH_HELIX + path,
-                                    "body": {"message": msg}}, ref)
-        st, b = self.helix("POST", path, {"message": msg})
-        self.hist.append("result", {"proposal_id": pid, "http": st,
-                                    "error": None if st == 204 else (b.get("message") or b.get("error")),
-                                    "note": "204 = accepted; Twitch may still drop silently. Delivery is proven only by the peer."},
-                         ref)
-        if st == 204:
-            with self.lock:
-                self.whispered.add(to)
-                self.dirty = True
+    # ---- canonical world and private ally input
+    def _ensure_game_locked(self):
+        game = self.state.get("game")
+        cfg = self.config
+        if game and game.get("opponent_id") == cfg.get("opponent_id") and game.get("self_id") == cfg.get("self_id"):
+            return game
+        if not cfg.get("self_id") or not cfg.get("opponent_id"):
+            return None
+        game = {"created_at": now_iso(), "opponent_id": cfg["opponent_id"],
+                "opponent_login": cfg["opponent_login"], "self_id": cfg["self_id"],
+                "world": initial_state()}
+        self.hist.required("control", {"op": "world_created", "version": game["world"]["version"],
+                                       "opponent_id": game["opponent_id"]})
+        self.state["game"] = game
+        self.state["pending"] = []
+        self.save_state_locked()
+        return game
 
-    # ---- game session (command bus only at this gate)
     def new_game(self) -> dict:
         with self.lock:
-            cfg = self.config
-            for k, err in (("client_id", "no_client_id"), ("self_id", "identity_not_confirmed"),
-                           ("opponent_id", "opponent_not_resolved")):
-                if not cfg.get(k):
-                    raise ApiError(409, err)
-            prev = self.state.get("game")
-            sid = secrets.token_hex(4)
-            self.state["game"] = {"sid": sid, "created_at": now_iso(), "opponent_id": cfg["opponent_id"],
-                                  "opponent_login": cfg["opponent_login"], "self_id": cfg["self_id"],
-                                  "self_login": cfg.get("self_login"), "last_seq": 0, "joined": None, "responses": {}}
+            if not self.config.get("self_id") or not self.config.get("opponent_id"):
+                raise ApiError(409, "identity_or_opponent_not_resolved")
+            previous = ((self.state.get("game") or {}).get("world") or {}).get("version")
+            game = {"created_at": now_iso(), "opponent_id": self.config["opponent_id"],
+                    "opponent_login": self.config["opponent_login"], "self_id": self.config["self_id"],
+                    "world": initial_state()}
+            self.hist.required("control", {"op": "world_reset", "previous_version": previous,
+                                           "opponent_id": game["opponent_id"]})
+            self.state["game"] = game
+            self.state["pending"] = []
+            self.outbound_epoch += 1
+            self.outbound.clear()
             self.save_state_locked()
-        self.hist.append("control", {"op": "game_session_created", "sid": sid, "opponent_id": cfg["opponent_id"],
-                                     "replaced_sid": prev["sid"] if prev else None})
-        return self.game_public()
+            return self.game_public()
 
     def game_public(self):
         g = self.state.get("game")
-        if not g:
+        if not g or not isinstance(g.get("world"), dict):
             return None
-        frag = urllib.parse.urlencode({"c": self.config.get("client_id") or "", "e": g["self_id"],
-                                       "el": g.get("self_login") or "", "s": g["sid"], "o": g.get("opponent_login") or ""})
-        return {"sid": g["sid"], "created_at": g["created_at"], "opponent_id": g["opponent_id"],
-                "opponent_login": g.get("opponent_login"), "self_id": g["self_id"], "last_seq": g["last_seq"],
-                "joined": g.get("joined"), "invite": self.config["village_url"] + "#" + frag}
+        return {"created_at": g["created_at"], "opponent_id": g["opponent_id"],
+                "opponent_login": g["opponent_login"], "self_id": g["self_id"],
+                "version": g["world"]["version"], "world": legal_view(g["world"]),
+                "pending_count": len(self.state.get("pending") or [])}
 
-    # ---- LM Studio (G7): reachability only; it must stay on loopback
+    def ally_advice(self, value) -> dict:
+        if not isinstance(value, str) or not value.strip() or len(value) > 500 or re.search(r"[\x00-\x1f\x7f]", value):
+            raise ApiError(400, "bad_advice")
+        with self.lock:
+            rec = {"text": _redact(value.strip()), "at": now_iso()}
+            self.hist.required("advice", rec)
+            self.state["advice"] = (self.state.get("advice") or [])[-7:] + [rec]
+            self.save_state_locked()
+            return {"ok": True, "advice": rec, "pending_count": len(self.state["advice"])}
+
+    # ---- Gemma proposes, rule engine resolves, state and evidence commit, Gemma voices observations
+    def _gemma_model(self) -> str:
+        probe = lm_check(self.config["lmstudio_url"])
+        with self.lock:
+            self.lm = probe
+        if not probe["reachable"]:
+            raise ValueError("LM Studio unavailable: " + str(probe.get("error")))
+        ids = [m for m in probe["models"] if isinstance(m, str) and re.search(r"gemma[._/-]?4", m, re.I)]
+        if not ids:
+            raise ValueError("no loaded Gemma 4 model")
+        def rank(name):
+            lower = name.lower()
+            return (0 if re.search(r"(?:e?4b|4b)(?:[^0-9]|$)", lower) else 1, len(name))
+        return sorted(ids, key=rank)[0]
+
+    def _lm_chat(self, model: str, messages: list, tokens: int = 180) -> str:
+        st, obj = http_json("POST", self.config["lmstudio_url"].rstrip("/") + "/v1/chat/completions",
+                            body={"model": model, "messages": messages, "temperature": 0.3,
+                                  "max_tokens": tokens, "response_format": {"type": "json_object"}}, timeout=60)
+        if st != 200:
+            raise ValueError("Gemma HTTP " + str(st) + ": " + str(obj.get("error") or obj.get("message"))[:120])
+        choices = obj.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            raise ValueError("Gemma returned no choices")
+        content = (choices[0].get("message") or {}).get("content")
+        if not isinstance(content, str):
+            raise ValueError("Gemma content is not a string")
+        return content
+
+    def _model_proposal(self, item: dict, world: dict, council: list, advice: list):
+        model = self._gemma_model()
+        projection = {"world": legal_view(world), "commander_intent": item["command"],
+                      "recent_council_suggestions": [{"chatter": x.get("chatter"), "text": x.get("text")}
+                                                     for x in council[-8:]],
+                      "ally_advice": [x["text"] for x in advice[-4:]],
+                      "legal_enemy_actions": ["raid", "fortify", "recruit", "wait"],
+                      "legal_directions": ["north", "south", "east", "west"]}
+        self.hist.required("model", {"op": "proposal_context", "model": model, "view": projection,
+                                     "message_id": item["message_id"]})
+        messages = [
+            {"role": "system", "content": "You are EXP0's game master and enemy strategist. The player order is intent, not fact. "
+             "Council and ally advice are advisory. You cannot change the world directly. Return ONLY a JSON object "
+             "with exactly enemy_action (raid|fortify|recruit|wait), enemy_target (cardinal direction only for raid, "
+             "otherwise null), and narration (one short atmospheric line, no claimed outcome). "
+             "The rule engine will resolve all actions after your proposal."},
+            {"role": "user", "content": json.dumps(projection, separators=(",", ":"), ensure_ascii=False)},
+        ]
+        for attempt in range(2):
+            raw = self._lm_chat(model, messages)
+            try:
+                proposal = validate_proposal(json.loads(raw))
+                self.hist.required("model", {"op": "proposal_accepted", "model": model,
+                                             "message_id": item["message_id"], "attempt": attempt + 1,
+                                             "proposal": proposal})
+                return proposal, model
+            except (ValueError, TypeError, KeyError) as ex:
+                self.hist.required("model", {"op": "proposal_rejected", "model": model,
+                                             "message_id": item["message_id"], "attempt": attempt + 1,
+                                             "reason": str(ex)[:150]})
+                messages.append({"role": "assistant", "content": raw[:500]})
+                messages.append({"role": "user", "content": "Invalid proposal: " + str(ex)[:150] +
+                                 ". Repair it. Return only the exact JSON object required by the system."})
+        raise ValueError("Gemma proposal invalid after one repair")
+
+    def _narrate(self, model: str, outcome: dict, public_world: dict, message_id: str) -> str:
+        summary = outcome["summary"]
+        observation = {"summary": summary, "events": outcome.get("events", []), "world": public_world}
+        self.hist.required("model", {"op": "narration_context", "model": model,
+                                     "message_id": message_id, "observation": observation})
+        try:
+            raw = self._lm_chat(model, [
+                {"role": "system", "content": "You narrate only the resolved, observable facts. Return a JSON object "
+                 "with exactly one key, narration. It MUST start with the exact supplied summary, verbatim. "
+                 "You may append exactly one of these atmospheric phrases: 'The air holds its breath.' "
+                 "or 'For now.' Or append nothing. Do not revise facts. Output JSON only."},
+                {"role": "user", "content": json.dumps(observation, separators=(",", ":"), ensure_ascii=False)},
+            ], 180)
+            obj = json.loads(raw)
+            if not isinstance(obj, dict) or set(obj) != {"narration"}:
+                raise ValueError("narration schema")
+            line = obj["narration"]
+            if not isinstance(line, str) or not line.startswith(summary) or len(line) > 450 or \
+                    re.search(r"[\x00-\x1f\x7f]", line):
+                raise ValueError("narration must preserve the authoritative summary")
+            suffix = line[len(summary):].strip()
+            # Closed vocabulary prevents a free-form suffix from narrating invented outcomes.
+            if suffix not in ("", "The air holds its breath.", "For now.") or \
+                    (suffix and line != summary + " " + suffix):
+                raise ValueError("extra narrated outcome")
+            self.hist.required("model", {"op": "narration_accepted", "model": model, "message_id": message_id,
+                                         "narration": line})
+            return line
+        except (ValueError, TypeError, KeyError, OSError) as ex:
+            self.hist.append("model", {"op": "narration_fallback", "message_id": message_id,
+                                       "reason": str(ex)[:150]})
+            return summary
+
+    def _game_pump(self) -> None:
+        while not self.stopping.is_set():
+            with self.work_cv:
+                while (not self.state.get("pending") or self.state.get("estop") or
+                       not self.edge.connected or not (self.token or {}).get("valid")) and not self.stopping.is_set():
+                    self.work_cv.wait(1.0)
+                if self.stopping.is_set():
+                    return
+                item = copy.deepcopy(self.state["pending"][0])
+                game = self.state.get("game")
+                if not game:
+                    self.state["pending"].pop(0)
+                    self.save_state_locked()
+                    continue
+                world = copy.deepcopy(game["world"])
+                council = copy.deepcopy(self.state.get("council") or [])
+                advice = copy.deepcopy(self.state.get("advice") or [])
+            try:
+                # Pure rule preflight avoids spending a model turn on an unaffordable order.
+                resolve_turn(world, item["command"],
+                             {"enemy_action": "wait", "enemy_target": None, "narration": "Preflight."})
+            except ValueError as ex:
+                with self.lock:
+                    if self.state.get("pending") and self.state["pending"][0]["message_id"] == item["message_id"]:
+                        self.hist.required("command_rejected", {"message_id": item["message_id"],
+                                                                "reason": str(ex)[:150]})
+                        self.state["pending"].pop(0)
+                        self.save_state_locked()
+                        self._enqueue_chat("Order refused: " + str(ex)[:150], "refusal:" + item["message_id"],
+                                           "rule engine refused the order")
+                continue
+            try:
+                proposal, model = self._model_proposal(item, world, council, advice)
+            except Exception as ex:
+                skipped = False
+                with self.lock:
+                    if self.edge.connected and (self.token or {}).get("valid") and \
+                            self.state.get("pending") and self.state["pending"][0]["message_id"] == item["message_id"]:
+                        self.hist.required("model", {"op": "turn_skipped", "message_id": item["message_id"],
+                                                    "reason": f"{type(ex).__name__}: {ex}"[:200]})
+                        self.state["pending"].pop(0)
+                        self.save_state_locked()
+                        skipped = True
+                if skipped:
+                    self._enqueue_chat("Gemma could not resolve that order. Try it again after checking LM Studio.",
+                                       "skip:" + item["message_id"], "model did not produce a legal proposal")
+                continue
+            try:
+                with self.lock:
+                    if self.state.get("estop") or not self.state.get("pending") or \
+                            self.state["pending"][0]["message_id"] != item["message_id"] or \
+                            self.state.get("game") is not game or game["world"]["version"] != world["version"] or \
+                            not self.edge.connected or not (self.token or {}).get("valid") or \
+                            self.token.get("user_id") != game["self_id"]:
+                        continue
+                    updated, outcome = resolve_turn(world, item["command"], proposal)
+                    ref = {"message_id": item["message_id"]}
+                    self.hist.required("resolution_prepared", {"message_id": item["message_id"],
+                                                              "action": item["command"]["action"],
+                                                              "from_version": world["version"],
+                                                              "to_version": updated["version"],
+                                                              "outcome": outcome}, ref)
+                    game["world"] = updated
+                    self.state["pending"].pop(0)
+                    self.save_state_locked()  # canonical commit before narration or Twitch call
+                    self.hist.required("applied", {"message_id": item["message_id"],
+                                                   "action": item["command"]["action"],
+                                                   "command": item["command"], "version": updated["version"],
+                                                   "outcome": outcome}, ref)
+                    public_world = legal_view(updated)
+                narration = self._narrate(model, outcome, public_world, item["message_id"])
+                with self.lock:
+                    if not self.state.get("estop") and self.state.get("game") is game:
+                        self._enqueue_chat(narration, "turn:" + item["message_id"],
+                                           "authoritative resolved turn " + str(updated["version"]))
+            except Exception as ex:
+                self.hist.append("error", {"op": "turn_resolution_failed", "message_id": item["message_id"],
+                                           "error": f"{type(ex).__name__}: {ex}"[:200]})
+                with self.lock:
+                    if self.state.get("pending") and self.state["pending"][0]["message_id"] == item["message_id"]:
+                        self.state["pending"].pop(0)
+                        self.save_state_locked()
+
+    # ---- LM Studio status
     def lm_probe(self) -> dict:
         res = lm_check(self.config["lmstudio_url"])
         with self.lock:
@@ -1229,33 +1452,27 @@ class Controller:
         self.hist.append("session", {"op": "lmstudio_probe", **res})
         return res
 
-    # ---- status
     def status(self) -> dict:
         with self.lock:
             cfg = self.config
-            with self.wq_cv:
-                qlen = len(self.wq)
             return {
                 "exp0": VERSION, "role": cfg["role"], "pid": os.getpid(), "uptime_s": int(time.time() - self.started),
                 "estop": bool(self.state.get("estop")),
                 "config": {k: cfg.get(k) for k in ("port", "client_id", "opponent_login", "opponent_id",
-                                                   "opponent_display", "self_id", "self_login", "permission",
-                                                   "ally_url", "village_url", "lmstudio_url", "limits")},
-                "required_scopes": list(REQUIRED_SCOPES),
-                "twitch": self.twitch_public(),
+                                                   "opponent_display", "self_id", "self_login", "ally_url",
+                                                   "village_url", "lmstudio_url", "limits")},
+                "required_scopes": list(REQUIRED_SCOPES), "twitch": self.twitch_public(),
                 "edge": {"running": self.edge.running(), "connected": self.edge.connected,
                          "session_id": self.edge.session_id, "subs": self.edge.subs, "error": self.edge.error,
                          "reconnects": self.edge.reconnects,
                          "last_msg_age_s": round(time.time() - self.edge.last_msg, 1) if self.edge.last_msg else None},
-                "tests": self.tests,
-                "game": self.game_public(),
-                "recent_chat": list(self.recent_chat),
+                "tests": self.tests, "game": self.game_public(), "recent_chat": list(self.recent_chat),
                 "recent_commands": list(self.recent_commands),
-                "whisper_queue": qlen,
-                "history": {"seq": self.hist.seq, "ok": self.hist.ok},
-                "lmstudio": self.lm,
+                "recent_council": [{"t": x.get("t"), "chatter": x.get("chatter"), "text": x.get("text")}
+                                   for x in (self.state.get("council") or [])],
+                "advice_count": len(self.state.get("advice") or []),
+                "history": {"seq": self.hist.seq, "ok": self.hist.ok}, "lmstudio": self.lm,
             }
-
 
 def lm_check(base: str) -> dict:
     host = urllib.parse.urlsplit(base).hostname or ""
@@ -1280,7 +1497,7 @@ ROUTES = {
     ("POST", "/v1/op/twitch/forget"): lambda c, b, q: c.forget_token(bool(b.get("revoke"))),
     ("POST", "/v1/op/identity/confirm"): lambda c, b, q: c.confirm_identity(),
     ("POST", "/v1/op/opponent"): lambda c, b, q: c.resolve_opponent(str(b.get("login") or "")),
-    ("POST", "/v1/op/permission"): lambda c, b, q: c.set_permission(bool(b.get("granted")), str(b.get("statement") or "")),
+    ("POST", "/v1/op/advice"): lambda c, b, q: c.ally_advice(b.get("text")),
     ("POST", "/v1/op/edge/start"): lambda c, b, q: c.edge_start(),
     ("POST", "/v1/op/edge/stop"): lambda c, b, q: c.edge_stop(),
     ("POST", "/v1/op/test/send"): lambda c, b, q: c.test_send(str(b.get("target") or "self")),
@@ -1568,7 +1785,8 @@ def cmd_status() -> int:
           + "".join(f"  {k}:{v.get('status')}" for k, v in (ed["subs"] or {}).items()))
     t = s["tests"]
     print("  tests    " + "  ".join(f"{k}:{'ok' if (t.get(k) or {}).get('ok') else '-'}" for k in ("eventsub", "chat_read", "chat_send")))
-    print(f"  game     {('sid ' + g['sid'] + '  last_seq ' + str(g['last_seq']) + ('  joined' if g['joined'] else '  not joined')) if g else 'none'}")
+    print(f"  game     {('day ' + str(g['world']['day']) + '  turn ' + str(g['world']['turn']) +
+                         '  version ' + str(g['version'])) if g else 'none (confirm identity and resolve BigRigJay)'}")
     print(f"  lmstudio {('reachable ' + ', '.join(lm['models'])) if lm and lm.get('reachable') else ('unreachable' if lm else 'not probed')}")
     print(f"  history  seq {s['history']['seq']}{'' if s['history']['ok'] else '  WRITE FAILING'}")
     print("  ally     " + ally_link(cfg, key))

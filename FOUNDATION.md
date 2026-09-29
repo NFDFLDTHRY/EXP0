@@ -1,4 +1,6 @@
 # TWITCH INTERACTION MACHINE
+> Historical V1 design document. The current playable chat game and authority rules are in README.md and GATES.md. The V1 whisper and second-login requirements below are superseded.
+
 ## FOUNDATION / READ FIRST
 
 PURPOSE

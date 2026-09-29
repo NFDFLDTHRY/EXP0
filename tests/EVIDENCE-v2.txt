@@ -1,0 +1,63 @@
+EXP0 V2 local integration evidence
+=================================
+
+Harness: python3 tests/e2e_v2.py
+Observed: 2026-09-29 UTC, 61 checks PASS, 0 FAIL, exit 0.
+History: 184 append-only, gapless NDJSON records across a controller restart.
+
+Method
+------
+- A fresh copy runs real setup.sh and the generated exp0 lifecycle commands.
+- The controller runs as a separate process on 127.0.0.1.
+- tests/fake_twitch.py serves fake Twitch identity, Helix and EventSub WebSocket,
+  and fake LM Studio /v1/models and /v1/chat/completions.
+- EventSub deliveries use channel.chat.message; tests replay the same chat ID.
+- Persistence is inspected in var/ across ./exp0 restart.
+- ally.html and village.html are statically checked. No browser automation runs here.
+
+Observed checkpoints
+--------------------
+- A fresh setup generated ./exp0; start/status/restart/stop worked on the copied
+  source. Only the operator's fake OAuth token was accepted. Controller required
+  user:read:chat and user:write:chat, and subscribed only to BigRigJay's numeric
+  broadcaster ID with the operator's numeric user ID. No whispers were used.
+  ./exp0 doctor verified the local controller, fake EventSub welcome and model
+  discovery. Its GitHack reachability check warned on this network restriction.
+- BigRigJay's numeric chat ID 123456 triggered !help and one !do scout north
+  commander turn. Fake Gemma received the legal public world projection, bounded
+  viewer council input, and operator advice; it received no private state keys.
+  The world advanced from version 1/day 1/turn 0 to version 2/day 2/turn 1.
+- History placed applied after resolution and before chat action/narration. The
+  emitted message targeted BigRigJay's chat and named the operator account as
+  sender. Fake Gemma returned a valid post-commit observation narration, which
+  preserved the exact resolved summary and appended a permitted atmospheric
+  phrase. A duplicate EventSub envelope and a new envelope with the same Twitch
+  chat message ID caused no second turn or second narration. An impostor with
+  the display name bigrigjay and numeric ID 666 gained no commander authority.
+- An illegal commander command never called the model or changed state. Two
+  malformed proposal attempts and two illegal proposal attempts each skipped
+  the turn without mutating the world. E-STOP prevented model work, mutation,
+  and Twitch output. Two legal palisade builds spent the available wood; a third
+  syntactically valid build was rejected without model work or state mutation,
+  and Jay received the concrete resource shortage. 17 viewer suggestions left
+  an ordered, bounded tail of 12 without advancing the world.
+- A fake current OAuth token deliberately pasted into private ally advice was
+  redacted before state/history storage and excluded from the model context.
+  Restart kept the same world and recent council but dropped the memory-only
+  token. After reauthorization, the old chat message ID remained deduplicated;
+  !status described the persisted day. No test OAuth token appeared in any
+  runtime var/ file after stop.
+- A controlled two-second fake LM response paused a commander turn. The test
+  disconnected EventSub while the model call was in flight; the world stayed
+  unchanged and the intent remained pending. Reconnecting EventSub resumed
+  that intent and committed exactly once.
+
+Proof boundary
+--------------
+Every passing harness check is SIMULATED transport and model evidence. It tests
+the real controller process, file persistence and HTTP/WebSocket code paths
+against fake external services. This environment has no live Twitch account,
+live Twitch channel, Chromium browser, or LM Studio/Gemma session. Browser OAuth,
+GitHack to loopback browser policy, real EventSub delivery, real Twitch chat
+send, and actual Gemma behavior remain PENDING-REAL. See GATES.md for the short
+operator proof sequence.

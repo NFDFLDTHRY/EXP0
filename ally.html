@@ -79,7 +79,7 @@
     <span class="pill" id="pCtl">controller</span>
     <span class="pill" id="pTw">twitch</span>
     <span class="pill" id="pEdge">edge</span>
-    <span class="pill" id="pGame">game</span>
+    <span class="pill" id="pGame">world</span>
     <span class="pill" id="pLm">lm studio</span>
     <span class="pill" id="pEstop">e-stop off</span>
   </div>
@@ -100,14 +100,13 @@
       <h3>TWITCH SETUP <span class="badge" id="bTw"></span></h3>
       <ol class="steps">
         <li id="st1">
-          <div class="t">Register a Twitch application (once)</div>
+          <div class="t">Register a Twitch application for your account (once)</div>
           <ul class="plain">
             <li>The account that owns the app needs two-factor authentication: <a href="https://www.twitch.tv/settings/security" target="_blank" rel="noopener">twitch.tv/settings/security</a> (Security &rarr; enable 2FA).</li>
             <li>Open <a href="https://dev.twitch.tv/console/apps/create" target="_blank" rel="noopener">dev.twitch.tv/console/apps/create</a>.</li>
             <li><b>Name</b>: unique across Twitch, e.g. <code id="appName">exp0</code> <button class="small" data-copy="appName">copy</button></li>
-            <li><b>OAuth Redirect URLs</b>: add <u>both</u>, pressing <i>Add</i> after each. They must match exactly:
-              <pre id="redirAlly"></pre><button class="small" data-copy="redirAlly">copy ally URL</button>
-              <pre id="redirVillage"></pre><button class="small" data-copy="redirVillage">copy village URL</button></li>
+            <li><b>OAuth Redirect URL</b>: add this exact ally URL and press <i>Add</i>:
+              <pre id="redirAlly"></pre><button class="small" data-copy="redirAlly">copy ally URL</button></li>
             <li><b>Category</b>: Chat Bot. <b>Client Type</b>: <b>Public</b> (cannot be changed later; public apps have no secret, which is what a browser page needs).</li>
             <li>Create &rarr; <i>Manage</i> &rarr; copy the <b>Client ID</b>. Never paste a client secret anywhere in EXP0.</li>
           </ul>
@@ -119,12 +118,11 @@
           <div class="out" id="o2"></div>
         </li>
         <li id="st3">
-          <div class="t">Authorize the enemy voice account</div>
-          <p class="note">Be logged in to Twitch in this browser as the account that will speak for the Gemma civilization in bigrigjay's chat. Scopes requested:</p>
+          <div class="t">Authorize your Twitch account</div>
+          <p class="note">Be logged in as the one account that will speak for EXP0 in BigRigJay's chat. Jay and viewers never sign in to EXP0. Scopes requested:</p>
           <ul class="plain">
             <li><code>user:read:chat</code> read chat through EventSub</li>
             <li><code>user:write:chat</code> send chat messages (every send passes the action gate)</li>
-            <li><code>user:manage:whispers</code> the private command link with village.html (receive and answer whispers)</li>
           </ul>
           <div class="row"><button id="bAuthorize" class="primary">Authorize with Twitch</button></div>
           <div class="out" id="o3"></div>
@@ -132,11 +130,11 @@
         <li id="st4">
           <div class="t">Verify account identity</div>
           <div id="idBody" class="note">Waiting for authorization.</div>
-          <div class="row"><button id="bConfirm" class="primary">This is the enemy voice account</button><button id="bForget" class="danger">Wrong account: forget token</button></div>
+          <div class="row"><button id="bConfirm" class="primary">This is my account</button><button id="bForget" class="danger">Wrong account: forget token</button></div>
           <div class="out" id="o4"></div>
         </li>
         <li id="st5">
-          <div class="t">Resolve the opponent to a numeric user id</div>
+          <div class="t">Resolve BigRigJay to a numeric user id</div>
           <input type="text" id="oppLogin" autocomplete="off" autocapitalize="off" spellcheck="false" value="bigrigjay">
           <div class="row"><button id="bResolve" class="primary">Resolve</button></div>
           <p class="note">Authority is the numeric id. A display name that says "bigrigjay" proves nothing.</p>
@@ -144,41 +142,29 @@
         </li>
         <li id="st6">
           <div class="t">Test EventSub</div>
-          <p class="note">Opens the controller's EventSub WebSocket and subscribes: your own chat, the opponent's chat, your whispers.</p>
+          <p class="note">Opens the controller's EventSub WebSocket to read BigRigJay's chat. Commands are attributed by numeric chatter ID.</p>
           <div class="row"><button id="bEdge" class="primary">Connect EventSub</button></div>
           <div id="subsBody" class="note"></div>
         </li>
         <li id="st7">
           <div class="t">Test chat read</div>
-          <p class="note">Needs one real chat message. Type anything in <a id="ownChatLink" href="#" target="_blank" rel="noopener">your own channel's chat</a>, or wait for one in the opponent's chat.</p>
+          <p class="note">Needs one real chat message in <a href="https://www.twitch.tv/bigrigjay" target="_blank" rel="noopener">BigRigJay's channel</a>.</p>
           <div id="readBody" class="note"></div>
         </li>
         <li id="st8">
           <div class="t">Test chat send</div>
-          <p class="note">Sends one deliberate <code>EXP0 TEST</code> message through the action gate. Your own channel first; the opponent's chat is locked until the streamer's permission is recorded below.</p>
-          <div class="row"><button id="bSendSelf" class="primary">Send TEST to my own channel</button><button id="bSendOpp">Send TEST to the opponent's chat</button></div>
+          <p class="note">Sends one deliberate <code>EXP0 TEST</code> through the action gate. The BigRigJay test checks the full send-and-echo path. Your own channel is a send-only check because EventSub listens to BigRigJay's chat.</p>
+          <div class="row"><button id="bSendSelf" class="primary">Send TEST to my channel</button><button id="bSendOpp">Send TEST to BigRigJay's chat</button></div>
           <div id="sendBody" class="note"></div>
         </li>
       </ol>
     </section>
 
     <section>
-      <h3>STREAMER PERMISSION <span class="badge" id="bPerm"></span></h3>
-      <p class="note">The machine speaks in the opponent's chat only with the streamer's explicit permission (FOUNDATION.md). Record who said yes, where, and when.</p>
-      <textarea id="permHow" placeholder="e.g. bigrigjay agreed on stream 2026-09-30 to play EXP0 against Gemma; enemy account may post game messages in his chat."></textarea>
-      <div class="chk"><input type="checkbox" id="permYes"><label for="permYes">The streamer explicitly permitted this account to post game messages in his chat.</label></div>
-      <div class="row"><button id="bPerm1" class="primary">Record permission</button><button id="bPerm0" class="danger">Withdraw</button></div>
-      <div class="out" id="oPerm"></div>
-    </section>
-
-    <section>
-      <h3>VILLAGE INVITE &middot; private command link <span class="badge" id="bGame"></span></h3>
-      <p class="note">Creates a game session and an invite for village.html. The streamer opens it, signs in with Twitch, and his commands reach this controller as whispers from his account; the controller answers with ACK whispers. Only whispers from the opponent's numeric id count.</p>
-      <div class="row"><button id="bNewGame" class="primary">New game session</button><button id="bCopyInvite" disabled>Copy invite link</button></div>
-      <pre id="invite" class="hide"></pre>
-      <div id="gameBody" class="note"></div>
-      <table id="cmdTable" class="hide"><thead><tr><th>time</th><th>from</th><th>seq</th><th>type</th><th>decision</th></tr></thead><tbody></tbody></table>
-      <p class="note">Whisper rules (Twitch): the <u>sender</u> needs a verified phone number; the first whisper to someone is limited to 500 characters; 3 per second, 100 per minute, 40 new recipients per day; Twitch may drop a whisper silently and still answer 204, so village.html retries the same sequence number until it sees the ACK. If a whisper is refused with 403, the recipient may be blocking whispers from strangers.</p>
+      <h3>CANONICAL WORLD <span class="badge" id="bGame"></span></h3>
+      <div id="gameBody" class="note">Confirm your account and resolve BigRigJay to create the persistent world.</div>
+      <p class="note">Only chat events whose numeric chatter ID matches BigRigJay can command. Viewer <code>!suggest</code> messages become council context. <a href="village.html" target="_blank" rel="noopener">Public how-to-play page</a>.</p>
+      <table id="cmdTable" class="hide"><thead><tr><th>time</th><th>chatter</th><th>input</th><th>result</th></tr></thead><tbody></tbody></table>
     </section>
 
     <section>
@@ -196,7 +182,7 @@
         <button id="bEdgeStop">Disconnect EventSub</button>
         <button id="bRevoke" class="danger">Revoke token at Twitch</button>
       </div>
-      <p class="note">E-STOP: no further external actions (chat or whispers) until cleared. Incoming commands are logged but not applied or answered; the village retries after you clear it.</p>
+      <p class="note">E-STOP stops chat output and game mutation. Incoming events remain evidence while it is set.</p>
     </section>
 
     <section>
@@ -209,7 +195,12 @@
   <div class="zone ally">
     <h2 class="zone-h">WAR COUNCIL <span>in-game ally &middot; advise Gemma, never puppet it</span></h2>
     <section>
-      <p>Not built yet. This zone arrives with gates G8&ndash;G12: Gemma's legal view of its civilization, its requests to you, your advice and the intelligence you may legally share. You will not be able to issue Gemma's orders from here; that would be puppeting.</p>
+      <h3>ADVISE GEMMA</h3>
+      <p class="note">Private advice enters Gemma's next bounded context. It cannot change the world by itself; the rule engine resolves all consequences.</p>
+      <textarea id="advice" maxlength="500" placeholder="What should Gemma consider?" aria-label="Private advice to Gemma"></textarea>
+      <div class="row"><button id="bAdvice" class="primary">SEND ADVICE TO GEMMA</button></div>
+      <div class="out" id="oAdvice" role="status"></div>
+      <div id="councilBody" class="note"></div>
     </section>
   </div>
 </main>
@@ -219,7 +210,6 @@
 const SS = window.sessionStorage;
 const K = { ctl: 'exp0.ally.ctl', state: 'exp0.ally.oauth_state', app: 'exp0.ally.appname' };
 const PAGE_URL = location.origin + location.pathname;
-const VILLAGE_URL = PAGE_URL.replace(/ally\.html$/, 'village.html');
 const $ = id => document.getElementById(id);
 let CTL = null, ST = null, conn = 'nolink', pendingToken = null, oauthNote = null, lastSeq = 0, busy = {};
 
@@ -287,11 +277,13 @@ function explain(e) {
     bad_client_id: 'That is not a Twitch Client ID (20-64 lowercase letters and digits).',
     twitch_rejected_token: 'Twitch rejected the token. Authorize again.',
     token_issued_to_different_client_id: 'That token belongs to a different Twitch app than the saved Client ID.',
-    wrong_twitch_account: 'A game session is bound to a different Twitch account. Log out of Twitch in this browser, log in as the bound account, authorize again - or create a new game session after confirming this account.',
+    wrong_twitch_account: 'The game is bound to another account. Log out of Twitch here, log in as the account you own for EXP0, and authorize again.',
     no_valid_token: 'Authorize with Twitch first (step 3).', identity_not_confirmed: 'Confirm the account identity first (step 4).',
     opponent_not_resolved: 'Resolve the opponent first (step 5).', no_client_id: 'Save the Client ID first (step 2).',
-    no_such_twitch_user: 'Twitch has no user with that login.', statement_required: 'Write how the permission was given (at least a sentence).',
-    game_bound_to_other_account: 'The active game session is bound to a different account.'
+    no_such_twitch_user: 'Twitch has no user with that login.',
+    game_bound_to_other_account: 'The active game is bound to a different account.',
+    advice_too_long: 'Keep advice under 500 characters.',
+    empty_advice: 'Write advice before sending.'
   };
   return (table[m] || m) + (e.status > 0 ? ' (HTTP ' + e.status + ')' : '');
 }
@@ -311,7 +303,7 @@ async function poll() {
 
 function render() {
   const s = ST;
-  $('redirAlly').textContent = PAGE_URL; $('redirVillage').textContent = VILLAGE_URL;
+  $('redirAlly').textContent = PAGE_URL;
   if (!ssGet(K.app)) ssSet(K.app, 'exp0-' + rand(3));
   $('appName').textContent = ssGet(K.app);
   // controller link
@@ -331,7 +323,7 @@ function render() {
   }
   if (oauthNote) out('o3', oauthNote[0], oauthNote[1]);
   const on = !!s;
-  ['bSaveClient', 'bAuthorize', 'bConfirm', 'bForget', 'bResolve', 'bEdge', 'bSendSelf', 'bSendOpp', 'bPerm1', 'bPerm0', 'bNewGame', 'bLm1', 'bEstop', 'bEdgeStop', 'bRevoke'].forEach(id => { $(id).disabled = !on; });
+  ['bSaveClient', 'bAuthorize', 'bConfirm', 'bForget', 'bResolve', 'bEdge', 'bSendSelf', 'bSendOpp', 'bAdvice', 'bLm1', 'bEstop', 'bEdgeStop', 'bRevoke'].forEach(id => { $(id).disabled = !on; });
   if (!s) { ['st1', 'st2', 'st3', 'st4', 'st5', 'st6', 'st7', 'st8'].forEach(id => stepState(id, '')); badge('bTw', 'controller needed', ''); return; }
 
   const c = s.config, tw = s.twitch, ed = s.edge, t = s.tests;
@@ -348,7 +340,7 @@ function render() {
   const idOk = tw.valid && c.self_id && c.self_id === tw.user_id;
   stepState('st4', idOk ? 'ok' : (tw.valid ? 'wait' : ''));
   $('idBody').innerHTML = tw.token ? ('Twitch says this token belongs to <b>' + esc(tw.login) + '</b> (numeric id <code>' + esc(tw.user_id) + '</code>).' +
-    (idOk ? ' Confirmed as the enemy voice account.' : (c.self_id ? ' <b style="color:var(--warn)">Previously confirmed account: ' + esc(c.self_login) + ' (' + esc(c.self_id) + ').</b>' : ''))) : 'Waiting for authorization.';
+    (idOk ? ' Confirmed as your EXP0 account.' : (c.self_id ? ' <b style="color:var(--warn)">Previously confirmed account: ' + esc(c.self_login) + ' (' + esc(c.self_id) + ').</b>' : ''))) : 'Waiting for authorization.';
   $('bConfirm').disabled = !tw.valid || idOk; $('bForget').disabled = !tw.token;
   // 5 opponent
   stepState('st5', c.opponent_id ? 'ok' : '');
@@ -356,13 +348,12 @@ function render() {
   $('bResolve').disabled = !tw.valid;
   // 6 eventsub
   const subs = ed.subs || {};
-  const subNames = { own_chat: 'your chat', opponent_chat: 'opponent chat', whispers: 'whispers' };
+  const subNames = { own_chat: 'your chat', opponent_chat: "BigRigJay's chat" };
   $('subsBody').innerHTML = (ed.running || Object.keys(subs).length) ? ('<div class="kv"><div>connection</div><div>' + (ed.connected ? 'connected, session ' + esc(ed.session_id) : (ed.running ? 'connecting&hellip;' : 'stopped')) + (ed.reconnects ? ' &middot; reconnects ' + ed.reconnects : '') + (ed.error && !ed.connected ? ' &middot; last error: ' + esc(ed.error) : '') + '</div>' +
     Object.keys(subs).map(k => '<div>' + esc(subNames[k] || k) + '</div><div>' + esc(subs[k].status) + (subs[k].error ? ' &middot; ' + esc(subs[k].error) + ' (HTTP ' + subs[k].http + ')' : '') + '</div>').join('') + '</div>') : '';
-  const allSubs = Object.keys(subs).length > 0 && Object.values(subs).every(x => x.status === 'enabled');
+  const allSubs = !!(subs.opponent_chat && subs.opponent_chat.status === 'enabled');
   stepState('st6', ed.connected && allSubs ? 'ok' : (ed.running ? 'wait' : ''));
   $('bEdge').disabled = !idOk || ed.running;
-  $('ownChatLink').href = tw.login ? 'https://www.twitch.tv/popout/' + encodeURIComponent(tw.login) + '/chat' : 'https://www.twitch.tv/';
   // 7 read
   const rd = t.chat_read;
   stepState('st7', rd && rd.ok ? 'ok' : (ed.connected ? 'wait' : ''));
@@ -370,31 +361,42 @@ function render() {
     (s.recent_chat.length ? '<table><tbody>' + s.recent_chat.slice(-6).reverse().map(m => '<tr><td>' + esc(m.channel_role) + '</td><td>' + esc(m.chatter) + (m.is_self ? ' (you)' : '') + '</td><td>' + esc(m.text) + '</td></tr>').join('') + '</tbody></table>' : '');
   // 8 send
   const sd = t.chat_send;
-  stepState('st8', sd && sd.ok ? 'ok' : (sd && sd.admitted === false ? 'bad' : ''));
-  $('sendBody').innerHTML = sd ? ('<p>' + (sd.admitted === false ? '<span style="color:var(--bad)">Refused by the action gate: ' + esc((sd.reasons || []).join(', ')) + '</span>' :
-    'Sent to ' + esc(sd.target) + ': "' + esc(sd.text) + '" &middot; HTTP ' + sd.http + ' &middot; is_sent=' + sd.is_sent + (sd.drop_reason ? ' &middot; dropped: ' + esc(JSON.stringify(sd.drop_reason)) : '') + ' &middot; ' + (sd.echo ? '<span style="color:var(--ok)">seen in chat (seq ' + sd.echo_seq + ')</span>' : 'waiting to see it in chat&hellip;')) + '</p>') : '';
-  const perm = c.permission && c.permission.granted;
-  $('bSendSelf').disabled = !ed.connected; $('bSendOpp').disabled = !ed.connected || !perm;
+  const sentAccepted = !!(sd && sd.admitted && sd.http === 200 && sd.is_sent);
+  const jayEcho = !!(sentAccepted && sd.target === 'opponent' && sd.echo);
+  stepState('st8', jayEcho ? 'ok' : (sentAccepted ? 'wait' : (sd && (sd.admitted === false || sd.is_sent === false) ? 'bad' : '')));
+  let sendReport = '';
+  if (sd && sd.admitted === false) {
+    sendReport = '<span style="color:var(--bad)">Refused by the action gate: ' + esc((sd.reasons || []).join(', ')) + '</span>';
+  } else if (sd) {
+    let proof;
+    if (jayEcho) proof = '<span style="color:var(--ok)">observed in BigRigJay chat (seq ' + esc(sd.echo_seq) + ')</span>';
+    else if (sd.target === 'self') proof = sentAccepted ? 'Twitch accepted the self-channel send; this channel has no EventSub echo check.' : 'Self-channel send was not accepted by Twitch.';
+    else proof = sentAccepted ? 'Twitch accepted the send; waiting for BigRigJay chat echo&hellip;' : 'Send was not accepted by Twitch.';
+    sendReport = 'Send request to ' + esc(sd.target) + ': "' + esc(sd.text) + '" &middot; HTTP ' + esc(sd.http) + ' &middot; is_sent=' + esc(sd.is_sent) +
+      (sd.drop_reason ? ' &middot; dropped: ' + esc(JSON.stringify(sd.drop_reason)) : '') + ' &middot; ' + proof;
+  }
+  $('sendBody').innerHTML = sendReport ? '<p>' + sendReport + '</p>' : '';
+  $('bSendSelf').disabled = !ed.connected; $('bSendOpp').disabled = !ed.connected || !c.opponent_id;
   // ready?
-  const ready = c.client_id && authOk && idOk && c.opponent_id && ed.connected && allSubs && rd && rd.ok && sd && sd.ok;
+  const ready = c.client_id && authOk && idOk && c.opponent_id && ed.connected && allSubs && rd && rd.ok && jayEcho;
   badge('bTw', ready ? 'TWITCH READY' : 'in progress', ready ? 'ok' : 'warn');
-  banner('ready', ready ? 'TWITCH READY &middot; ' + esc(tw.login) + ' (' + esc(tw.user_id) + ') reads and writes chat, opponent ' + esc(c.opponent_login) + ' = ' + esc(c.opponent_id) : null, 'ok');
+  banner('ready', ready ? 'TWITCH READY &middot; ' + esc(tw.login) + ' (' + esc(tw.user_id) + ') reads and writes chat, BigRigJay = ' + esc(c.opponent_id) : null, 'ok');
   pill('pTw', tw.valid ? 'twitch ' + tw.login : (tw.token ? 'twitch INVALID' : 'twitch -'), tw.valid ? 'ok' : (tw.token ? 'bad' : ''));
   pill('pEdge', ed.connected ? 'edge connected' : (ed.running ? 'edge connecting' : 'edge off'), ed.connected ? 'ok' : (ed.running ? 'warn' : ''));
-  // permission
-  badge('bPerm', perm ? 'recorded ' + c.permission.recorded_at.slice(0, 10) : 'not recorded', perm ? 'ok' : 'warn');
-  if (c.permission && document.activeElement !== $('permHow') && !$('permHow').value) $('permHow').value = c.permission.statement || '';
-  // game
+  // canonical game; status exposes only the public legal view
   const g = s.game;
-  pill('pGame', g ? 'game ' + g.sid + (g.joined ? ' joined' : '') : 'game -', g ? (g.joined ? 'ok' : 'warn') : '');
-  badge('bGame', g ? (g.joined ? 'opponent joined' : 'waiting for opponent') : 'no session', g ? (g.joined ? 'ok' : 'warn') : '');
-  $('bNewGame').disabled = !(idOk && c.opponent_id && c.client_id);
-  $('invite').textContent = g ? g.invite : ''; $('invite').classList.toggle('hide', !g); $('bCopyInvite').disabled = !g;
-  $('gameBody').innerHTML = g ? ('<div class="kv"><div>session</div><div>' + esc(g.sid) + ' &middot; created ' + esc(g.created_at) + '</div><div>opponent</div><div>' + esc(g.opponent_login) + ' (' + esc(g.opponent_id) + ')</div><div>joined</div><div>' + (g.joined ? esc(g.joined.at) + ' as ' + esc(g.joined.login) : 'not yet') + '</div><div>last seq</div><div>' + g.last_seq + '</div><div>ACK queue</div><div>' + s.whisper_queue + '</div></div>' +
-    (VILLAGE_URL !== c.village_url ? '<p style="color:var(--warn)">Note: this page is ' + esc(PAGE_URL) + ' but invites point to ' + esc(c.village_url) + ' (var/config.json village_url).</p>' : '')) : '';
+  const w = g && g.world;
+  const worldFields = ['day', 'turn', 'population', 'food', 'wood', 'stone', 'defenders', 'enemy_strength', 'enemy_supply', 'village_defense', 'morale', 'known_enemy_pressure', 'known_enemy_front', 'current_event', 'result'];
+  pill('pGame', w ? 'world day ' + w.day : 'world -', w ? 'ok' : 'warn');
+  badge('bGame', w ? 'version ' + g.version : 'awaiting identity setup', w ? 'ok' : 'warn');
+  $('gameBody').innerHTML = w ? '<div class="kv">' + worldFields.filter(k => k in w).map(k => '<div>' + esc(k.replaceAll('_', ' ')) + '</div><div>' + esc(w[k] == null ? 'unknown' : (typeof w[k] === 'object' ? JSON.stringify(w[k]) : w[k])) + '</div>').join('') + '</div>' : 'Confirm your account and resolve BigRigJay to create the persistent world.';
   const rows = (s.recent_commands || []).slice().reverse();
   $('cmdTable').classList.toggle('hide', !rows.length);
-  $('cmdTable').querySelector('tbody').innerHTML = rows.map(r => '<tr><td>' + esc((r.t || '').slice(11, 19)) + '</td><td>' + esc(r.from) + '</td><td>' + esc(r.seq == null ? '' : r.seq) + '</td><td>' + esc(r.type || '') + '</td><td style="color:' + (r.admitted ? 'var(--ok)' : 'var(--bad)') + '">' + (r.admitted ? 'applied' : esc((r.reasons || []).join(', '))) + '</td></tr>').join('');
+  $('cmdTable').querySelector('tbody').innerHTML = rows.map(r => '<tr><td>' + esc((r.t || '').slice(11, 19)) + '</td><td>' + esc(r.from || r.chatter || '') + '</td><td>' + esc(r.text || r.action || r.type || '') + '</td><td>' + esc(r.result || (r.admitted ? 'intent recorded' : (r.reasons || []).join(', '))) + '</td></tr>').join('');
+  $('bAdvice').disabled = !!s.estop;
+  const council = (s.recent_council || []).slice(-5).reverse();
+  $('councilBody').innerHTML = '<p>Pending private advice: ' + esc(s.advice_count == null ? 0 : s.advice_count) + '. Recent chat council:</p>' +
+    (council.length ? '<table><tbody>' + council.map(m => '<tr><td>' + esc(m.chatter || '') + '</td><td>' + esc(m.text || '') + '</td></tr>').join('') + '</tbody></table>' : '<p>No viewer suggestions yet.</p>');
   // lm studio
   const lm = s.lmstudio;
   $('lmUrl').textContent = c.lmstudio_url;
@@ -404,7 +406,7 @@ function render() {
   // e-stop
   pill('pEstop', s.estop ? 'E-STOP' : 'e-stop off', s.estop ? 'bad' : '');
   $('bEstop').classList.toggle('hide', s.estop); $('bEstopClear').classList.toggle('hide', !s.estop); $('bEstopClear').disabled = false;
-  banner('estop', s.estop ? 'EMERGENCY STOP is set. No chat messages or whispers leave this machine until you clear it.' : null, '');
+  banner('estop', s.estop ? 'EMERGENCY STOP is set. Chat output and game mutation are paused until you clear it.' : null, '');
   banner('hist', s.history.ok ? null : 'HISTORY CANNOT BE WRITTEN. The action gate refuses all external actions until this is fixed (disk full?).', '');
   badge('bHist', 'seq ' + s.history.seq, s.history.ok ? '' : 'bad');
   $('bEdgeStop').disabled = !ed.running; $('bRevoke').disabled = !tw.token;
@@ -415,12 +417,24 @@ function brief(r) {
   const d = r.data || {};
   switch (r.kind) {
     case 'event': return d.duplicate ? 'DUPLICATE dropped ' + (d.message_id || '') : '[' + d.channel_role + ' ' + (d.channel_login || '') + '] ' + (d.chatter_name || '?') + (d.is_self ? ' (self)' : '') + ': ' + d.text;
-    case 'command': return d.duplicate_delivery ? 'DUPLICATE whisper delivery dropped' : 'whisper from ' + d.from_user_login + ' (' + d.from_user_id + ', shown as "' + d.from_user_name + '"): ' + d.text;
-    case 'admission': return (d.admitted ? 'ADMIT ' : 'REJECT ') + (d.proposal_id || ('whisper ' + (d.seq != null ? 'seq ' + d.seq + ' ' : '') + (d.type || ''))) + (d.reasons && d.reasons.length ? ' : ' + d.reasons.join(', ') : '');
-    case 'applied': return 'APPLIED seq ' + d.seq + ' ' + d.type + ' ok=' + d.ok + ' ' + JSON.stringify(d.result);
+    case 'command': return (d.role || 'commander') + ' ' + (d.action || d.type || '') + (d.target ? ' ' + d.target : '') + ' (message ' + (d.message_id || '?') + ')';
+    case 'council': return (d.chatter || 'viewer') + ': !suggest ' + (d.text || '');
+    case 'advice': return 'private advice queued: ' + (d.text || '');
+    case 'admission': return (d.admitted ? 'ADMIT ' : 'REJECT ') + (d.proposal_id || d.message_id || d.type || '') + (d.reasons && d.reasons.length ? ' : ' + d.reasons.join(', ') : '');
+    case 'resolution_prepared': return 'prepared ' + (d.action || '?') + ' v' + d.from_version + ' to v' + d.to_version + ': ' + ((d.outcome || {}).summary || '');
+    case 'applied': return 'committed ' + (d.action || d.type || '?') + ' v' + (d.version == null ? '?' : d.version) + ': ' + ((d.outcome || {}).summary || JSON.stringify(d.result || {}));
+    case 'model': {
+      const op = d.op || 'model';
+      if (op === 'proposal_context') return 'Gemma context: v' + (((d.view || {}).world || {}).version || '?') + ', ' + (((d.view || {}).recent_council_suggestions || []).length) + ' council, ' + (((d.view || {}).ally_advice || []).length) + ' advice';
+      if (op === 'proposal_accepted') return 'Gemma proposal accepted: ' + JSON.stringify(d.proposal || {});
+      if (op === 'narration_context') return 'Gemma observation after commit: ' + (((d.observation || {}).summary) || '');
+      return op + (d.reason ? ': ' + d.reason : '') + (d.narration ? ': ' + d.narration : '');
+    }
     case 'proposal': return d.action_type + ' ' + (d.channel || ('to ' + d.to_user_id)) + ' "' + d.message + '" [' + d.reason + ']';
     case 'action': return d.method + ' ' + d.url.replace(/^https:\/\/api\.twitch\.tv/, '') + ' ' + JSON.stringify(d.body);
-    case 'result': return d.confirmed_by_event ? 'CONFIRMED in chat ' + d.message_id : 'HTTP ' + d.http + (d.is_sent != null ? ' is_sent=' + d.is_sent : '') + (d.error ? ' ' + d.error : '');
+    case 'result': return d.confirmed_by_event ? 'CONFIRMED in chat ' + d.message_id :
+      (d.op === 'chat_dropped' ? 'chat dropped: ' + (d.reason || d.error || d.source_key || '') :
+        'HTTP ' + (d.http == null ? '?' : d.http) + (d.is_sent != null ? ' is_sent=' + d.is_sent : '') + (d.error ? ' ' + d.error : ''));
     default: return (d.op || '') + ' ' + JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k]) => k !== 'op')));
   }
 }
@@ -448,16 +462,17 @@ $('bAuthorize').onclick = () => {
   const q = new URLSearchParams({ response_type: 'token', client_id: ST.config.client_id, redirect_uri: PAGE_URL, scope: ST.required_scopes.join(' '), state, force_verify: 'true' });
   location.assign('https://id.twitch.tv/oauth2/authorize?' + q.toString());
 };
-$('bConfirm').onclick = () => act('confirm', () => api('POST', '/v1/op/identity/confirm'), 'o4', r => 'Confirmed: ' + r.self_login + ' (' + r.self_id + ') is the enemy voice account.');
+$('bConfirm').onclick = () => act('confirm', () => api('POST', '/v1/op/identity/confirm'), 'o4', r => 'Confirmed your account: ' + r.self_login + ' (' + r.self_id + ').');
 $('bForget').onclick = () => act('forget', () => api('POST', '/v1/op/twitch/forget', { revoke: true }), 'o4', 'Token revoked and forgotten. Log out of Twitch in this browser, log in as the right account, then Authorize again.');
 $('bResolve').onclick = () => act('resolve', () => api('POST', '/v1/op/opponent', { login: $('oppLogin').value }), 'o5', r => r.login + ' → ' + r.id);
 $('bEdge').onclick = () => act('edge', () => api('POST', '/v1/op/edge/start'));
 $('bSendSelf').onclick = () => act('send', () => api('POST', '/v1/op/test/send', { target: 'self' }));
 $('bSendOpp').onclick = () => act('send', () => api('POST', '/v1/op/test/send', { target: 'opponent' }));
-$('bPerm1').onclick = () => { if (!$('permYes').checked) { out('oPerm', 'Tick the box to confirm the permission is explicit.', 'bad'); return; } act('perm', () => api('POST', '/v1/op/permission', { granted: true, statement: $('permHow').value }), 'oPerm', 'Recorded in var/config.json and in history.'); };
-$('bPerm0').onclick = () => act('perm', () => api('POST', '/v1/op/permission', { granted: false, statement: $('permHow').value }), 'oPerm', 'Withdrawn: sending to the opponent\'s chat is locked.');
-$('bNewGame').onclick = () => { if (ST && ST.game && !confirm('Replace the current game session? The old invite stops working.')) return; act('game', () => api('POST', '/v1/op/game/new')); };
-$('bCopyInvite').onclick = async () => { try { await navigator.clipboard.writeText($('invite').textContent); $('bCopyInvite').textContent = 'copied'; setTimeout(() => $('bCopyInvite').textContent = 'Copy invite link', 1500); } catch (e) {} };
+$('bAdvice').onclick = () => {
+  const text = $('advice').value.trim();
+  if (!text) { out('oAdvice', 'Write advice before sending.', 'bad'); return; }
+  act('advice', () => api('POST', '/v1/op/advice', { text }), 'oAdvice', r => { $('advice').value = ''; return 'Saved for Gemma\'s next decision (' + r.pending_count + ' pending).'; });
+};
 $('bLm1').onclick = () => act('lm', () => api('POST', '/v1/op/lmstudio/probe'));
 $('bEstop').onclick = () => act('estop', () => api('POST', '/v1/op/estop'));
 $('bEstopClear').onclick = () => act('estop', () => api('POST', '/v1/op/estop/clear'));

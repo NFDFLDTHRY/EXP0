@@ -25,7 +25,7 @@ The product runtime needs only Python 3.11+ standard library. The test harness n
 
 ## Shortest real proof tonight
 
-1. On the Debian machine, load Gemma 4 in LM Studio and start its server on `127.0.0.1:1234` with LAN serving off. Run `./setup.sh`, `./exp0 start`, and `./exp0 doctor`.
+1. On the Debian machine, load Gemma 4 in LM Studio and start its server on `127.0.0.1:1234` with LAN serving off. Run `./setup.sh`, `./exp0 start`, and `./exp0 doctor`. Use the printed commit-pinned GitHack links; the mutable `/main/` cache may lag.
 2. Open the printed ally.html link **on that machine**. Register its exact redirect URL in the public Twitch app if needed. Save the Client ID, authorize only your Twitch account, confirm the numeric ID, resolve `bigrigjay`, connect EventSub, and check the model status.
 3. In BigRigJay's chat, have Jay type `!help`; verify the response is from your account. Use ally.html to send a TEST to BigRigJay's chat and wait for its EventSub echo. Have Jay type `!do scout north`; verify one intent, one Gemma proposal, one committed world version, and a later narration in `var/history.ndjson`.
 4. Have a viewer type `!suggest fortify west`. On the next Jay `!do`, verify it appears in the bounded model context and does not itself advance the turn. Run `./exp0 restart`, open its **new** ally link, reauthorize your account, reconnect EventSub, and have Jay type `!status`. The same world must appear.

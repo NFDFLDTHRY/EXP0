@@ -2,7 +2,7 @@
 
 EXP0 is a small persistent village war game played in [BigRigJay's Twitch chat](https://www.twitch.tv/bigrigjay). Jay commands the village with `!do`; viewers advise with `!suggest`. A local Gemma model chooses the enemy move. The rule engine resolves the turn and persists the result before EXP0 narrates through **your** Twitch account.
 
-Exactly one Twitch account authorizes EXP0: yours. Jay and viewers use ordinary chat. Their numeric Twitch chatter IDs determine their roles; a display name grants no authority. [village.html](https://raw.githack.com/NFDFLDTHRY/EXP0/main/village.html) is a public companion page and never authenticates anyone.
+Exactly one Twitch account authorizes EXP0: yours. Jay and viewers use ordinary chat. Their numeric Twitch chatter IDs determine their roles; a display name grants no authority. `./exp0 start` prints both immutable GitHack links: the private ally setup link and the public `village.html` guide. The public page never authenticates anyone.
 
 ## Play on Debian 13
 
@@ -16,7 +16,7 @@ Exactly one Twitch account authorizes EXP0: yours. Jay and viewers use ordinary 
    ./exp0 start
    ```
 
-3. Open the **ally.html link printed by `./exp0 start` on that same machine**. Its `#p=…&k=…` fragment carries an ephemeral local controller key. Follow the page's wizard: create a public Twitch app if needed, save its Client ID, authorize **your** account for `user:read:chat` and `user:write:chat`, confirm the account, resolve `bigrigjay`, connect EventSub, and test reading and sending chat. The app's OAuth redirect URL must exactly match the ally URL displayed by the page, without the fragment.
+3. Open the **ally.html link printed by `./exp0 start` on that same machine**. It is pinned to the cloned commit so GitHack cannot mix cached branch revisions. Its `#p=…&k=…` fragment carries an ephemeral local controller key. Follow the page's wizard: create a public Twitch app if needed, save its Client ID, authorize **your** account for `user:read:chat` and `user:write:chat`, confirm the account, resolve `bigrigjay`, connect EventSub, and test reading and sending chat. The app's OAuth redirect URL must exactly match the ally URL displayed by the page, without the fragment.
 4. Check the loaded model in the LM Studio section. The world is seeded when your identity and Jay's numeric ID are resolved. Jay types `!help`, then `!do scout north` in his own Twitch chat. A viewer can type `!suggest fortify west`; advice enters the next bounded council context and has no direct authority. Your private advice box on ally.html also enters Gemma's next context.
 5. Use `./exp0 status`, `./exp0 logs`, and `./exp0 doctor` to inspect the system. **E-STOP** on ally.html prevents game mutation and Twitch output.
 

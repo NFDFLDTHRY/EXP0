@@ -1634,8 +1634,29 @@ def local_get(port: int, path: str, key: str | None = None, timeout: float = 3.0
     return http_json("GET", f"http://127.0.0.1:{port}{path}", h, timeout=timeout)
 
 
+def published_page_url(url: str) -> str:
+    """Pin the default GitHack branch URL to this checkout's commit.
+
+    GitHack can cache different branch pages at different revisions. A fresh
+    clone has .git, so the printed OAuth redirect and public guide both use
+    the exact, immutable revision that supplied this controller. Custom URLs
+    and source archives without git keep their configured URL.
+    """
+    prefix = "https://raw.githack.com/NFDFLDTHRY/EXP0/main/"
+    if not url.startswith(prefix):
+        return url
+    try:
+        rev = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+                             text=True, timeout=2, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return url
+    if not re.fullmatch(r"[0-9a-f]{40}", rev):
+        return url
+    return url.replace(prefix, f"https://raw.githack.com/NFDFLDTHRY/EXP0/{rev}/", 1)
+
+
 def ally_link(cfg: dict, key: str) -> str:
-    return f"{cfg['ally_url']}#p={cfg['port']}&k={key}"
+    return f"{published_page_url(cfg['ally_url'])}#p={cfg['port']}&k={key}"
 
 
 def cmd_init(argv: list) -> int:
@@ -1739,6 +1760,8 @@ def cmd_start() -> int:
     print(f"EXP0 controller running: 127.0.0.1:{cfg['port']} (loopback only), pid {proc.pid}, role {cfg['role']}")
     print("Open ally.html with this link (everything after # stays in your browser):")
     print("  " + ally_link(cfg, key))
+    print("Public village.html guide:")
+    print("  " + published_page_url(cfg["village_url"]))
     return 0
 
 
@@ -1790,6 +1813,7 @@ def cmd_status() -> int:
     print(f"  lmstudio {('reachable ' + ', '.join(lm['models'])) if lm and lm.get('reachable') else ('unreachable' if lm else 'not probed')}")
     print(f"  history  seq {s['history']['seq']}{'' if s['history']['ok'] else '  WRITE FAILING'}")
     print("  ally     " + ally_link(cfg, key))
+    print("  village  " + published_page_url(cfg["village_url"]))
     return 0
 
 
@@ -1878,9 +1902,10 @@ def cmd_doctor() -> int:
         line("FAIL", "controller not running (./exp0 start)")
     for ok, why in twitch_reach():
         line("PASS" if ok else "FAIL", why)
-    st, b = http_json("GET", cfg["ally_url"], timeout=8)
+    ally_url = published_page_url(cfg["ally_url"])
+    st, b = http_json("GET", ally_url, timeout=8)
     gh_ok = st == 200 and "EXP0 / ALLY" in str(b.get("raw", ""))
-    line("PASS" if gh_ok else "WARN", f"{cfg['ally_url']} (HTTP {st}{'' if gh_ok else ': ' + str(b.get('raw') or b.get('error') or '')[:90]})")
+    line("PASS" if gh_ok else "WARN", f"{ally_url} (HTTP {st}{'' if gh_ok else ': ' + str(b.get('raw') or b.get('error') or '')[:90]})")
     if s:
         tw = s["twitch"]
         if tw["valid"]:

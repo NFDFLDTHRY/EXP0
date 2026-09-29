@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>EXP0 / ALLY</title>
+<style>
+  :root { --bg:#0c0e11; --panel:#12161b; --fg:#d8dce1; --dim:#8b929b; --line:#262c34; --ok:#5fd38d; --warn:#f2c14e; --bad:#ff6b6b; --acc:#8ab4f8; --op:#ff9b6b; --ally:#6be3c8; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 ui-monospace,Menlo,Consolas,"Liberation Mono",monospace; }
+  main { max-width:880px; margin:0 auto; padding:14px 16px 80px; }
+  h1 { font-size:18px; letter-spacing:.06em; margin:4px 0 6px; }
+  .sub { color:var(--dim); font-size:13px; margin:0 0 12px; }
+  .pills { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px; }
+  .pill { font-size:12px; padding:2px 9px; border-radius:12px; border:1px solid var(--line); color:var(--dim); white-space:nowrap; }
+  .pill.ok { color:#0b1a10; background:var(--ok); border-color:var(--ok); }
+  .pill.warn { color:#1a1400; background:var(--warn); border-color:var(--warn); }
+  .pill.bad { color:#1a0000; background:var(--bad); border-color:var(--bad); }
+  .zone { border:1px solid var(--line); border-radius:8px; padding:10px 12px 4px; margin:0 0 16px; }
+  .zone.op { border-color:#5a3524; }
+  .zone.ally { border-color:#1f4d44; }
+  .zone-h { font-size:14px; margin:0 0 10px; letter-spacing:.08em; display:flex; flex-wrap:wrap; gap:4px 12px; align-items:baseline; }
+  .zone.op .zone-h { color:var(--op); } .zone.ally .zone-h { color:var(--ally); }
+  .zone-h span { font-size:12px; color:var(--dim); letter-spacing:0; font-weight:normal; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin:0 0 12px; }
+  h3 { font-size:13px; margin:0 0 8px; letter-spacing:.05em; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .badge { font-size:11px; padding:1px 7px; border-radius:10px; border:1px solid var(--line); color:var(--dim); }
+  .badge.ok { color:#0b1a10; background:var(--ok); border-color:var(--ok); }
+  .badge.warn { color:#1a1400; background:var(--warn); border-color:var(--warn); }
+  .badge.bad { color:#1a0000; background:var(--bad); border-color:var(--bad); }
+  ol.steps { list-style:none; padding:0; margin:0; counter-reset:s; }
+  ol.steps > li { border-top:1px solid var(--line); padding:9px 0 9px 34px; position:relative; counter-increment:s; }
+  ol.steps > li:first-child { border-top:0; }
+  ol.steps > li::before { content:counter(s); position:absolute; left:0; top:9px; width:24px; height:24px; border-radius:50%; border:1px solid var(--line); color:var(--dim); text-align:center; line-height:22px; font-size:12px; }
+  ol.steps > li.ok::before { content:"\2713"; background:var(--ok); color:#0b1a10; border-color:var(--ok); }
+  ol.steps > li.bad::before { background:var(--bad); color:#1a0000; border-color:var(--bad); }
+  ol.steps > li.wait::before { border-color:var(--warn); color:var(--warn); }
+  .t { font-weight:bold; }
+  p { margin:5px 0; }
+  ul.plain { margin:4px 0; padding-left:18px; }
+  code, .mono { background:#1a2028; padding:1px 5px; border-radius:3px; word-break:break-all; }
+  pre { background:#0a0c0f; border:1px solid var(--line); padding:8px; border-radius:4px; white-space:pre-wrap; word-break:break-all; margin:6px 0; font-size:12.5px; }
+  input[type=text], textarea { width:100%; background:#0f1318; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:9px; font:inherit; margin-top:4px; }
+  textarea { min-height:64px; }
+  button { min-height:40px; padding:7px 13px; margin:6px 6px 0 0; background:#1c222b; color:var(--fg); border:1px solid #3a4250; border-radius:5px; font:inherit; cursor:pointer; }
+  button.primary { background:#20406a; border-color:#3b6ea8; color:#fff; }
+  button.danger { border-color:#7a2f2f; color:#ffb3b3; }
+  button.estop { background:#7a1f1f; border-color:#c33; color:#fff; font-weight:bold; letter-spacing:.06em; min-height:48px; }
+  button.small { min-height:28px; padding:2px 9px; font-size:12px; margin:0 0 0 6px; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .row { display:flex; flex-wrap:wrap; align-items:center; gap:0 4px; }
+  .out { font-size:13px; margin-top:6px; min-height:0; }
+  .out.ok { color:var(--ok); } .out.bad { color:var(--bad); } .out.warn { color:var(--warn); }
+  .note { color:var(--dim); font-size:12.5px; }
+  .kv { display:grid; grid-template-columns:max-content 1fr; gap:2px 12px; font-size:13px; }
+  .kv > div:nth-child(odd) { color:var(--dim); }
+  .banner { border:1px solid var(--bad); background:#2a1111; color:#ffc2c2; padding:8px 10px; border-radius:5px; margin:0 0 10px; }
+  .banner.warn { border-color:var(--warn); background:#2a2410; color:#ffe7a6; }
+  .banner.ok { border-color:var(--ok); background:#0f2a1a; color:#b8f5cf; font-weight:bold; letter-spacing:.04em; }
+  .chk { display:flex; gap:8px; align-items:flex-start; margin-top:8px; }
+  .chk input { width:20px; height:20px; margin-top:1px; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  td, th { text-align:left; padding:3px 6px; border-top:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:normal; }
+  #tail { background:#0a0c0f; border:1px solid var(--line); border-radius:4px; padding:6px 8px; height:300px; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-all; }
+  #tail div { padding:1px 0; border-bottom:1px dotted #1b2027; }
+  .k-event { color:#9ec9ff; } .k-command { color:#c9b3ff; } .k-proposal { color:#ffd479; } .k-admission { color:#a8e6a1; }
+  .k-applied { color:#6be3c8; } .k-action { color:#ffb86c; } .k-result { color:#5fd38d; } .k-error { color:#ff6b6b; }
+  .k-control { color:#d8dce1; } .k-session { color:#8b929b; }
+  a { color:var(--acc); }
+  .hide { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>EXP0 / ALLY</h1>
+  <div class="pills">
+    <span class="pill" id="pCtl">controller</span>
+    <span class="pill" id="pTw">twitch</span>
+    <span class="pill" id="pEdge">edge</span>
+    <span class="pill" id="pGame">game</span>
+    <span class="pill" id="pLm">lm studio</span>
+    <span class="pill" id="pEstop">e-stop off</span>
+  </div>
+  <p class="sub">User + Gemma 4 side of EXP0. This page holds two authorities that never mix:
+    <b style="color:var(--op)">OPERATOR</b> (the machine: Twitch wiring, services, emergency stop) and
+    <b style="color:var(--ally)">WAR COUNCIL</b> (your role inside the game). It talks only to your own controller on 127.0.0.1.</p>
+  <div id="banners"></div>
+
+  <div class="zone op">
+    <h2 class="zone-h">OPERATOR <span>machine authority &middot; not part of the game &middot; never visible to the other side</span></h2>
+
+    <section>
+      <h3>CONTROLLER LINK <span class="badge" id="bCtl"></span></h3>
+      <div id="ctlBody"></div>
+    </section>
+
+    <section>
+      <h3>TWITCH SETUP <span class="badge" id="bTw"></span></h3>
+      <ol class="steps">
+        <li id="st1">
+          <div class="t">Register a Twitch application (once)</div>
+          <ul class="plain">
+            <li>The account that owns the app needs two-factor authentication: <a href="https://www.twitch.tv/settings/security" target="_blank" rel="noopener">twitch.tv/settings/security</a> (Security &rarr; enable 2FA).</li>
+            <li>Open <a href="https://dev.twitch.tv/console/apps/create" target="_blank" rel="noopener">dev.twitch.tv/console/apps/create</a>.</li>
+            <li><b>Name</b>: unique across Twitch, e.g. <code id="appName">exp0</code> <button class="small" data-copy="appName">copy</button></li>
+            <li><b>OAuth Redirect URLs</b>: add <u>both</u>, pressing <i>Add</i> after each. They must match exactly:
+              <pre id="redirAlly"></pre><button class="small" data-copy="redirAlly">copy ally URL</button>
+              <pre id="redirVillage"></pre><button class="small" data-copy="redirVillage">copy village URL</button></li>
+            <li><b>Category</b>: Chat Bot. <b>Client Type</b>: <b>Public</b> (cannot be changed later; public apps have no secret, which is what a browser page needs).</li>
+            <li>Create &rarr; <i>Manage</i> &rarr; copy the <b>Client ID</b>. Never paste a client secret anywhere in EXP0.</li>
+          </ul>
+        </li>
+        <li id="st2">
+          <div class="t">Client ID</div>
+          <input type="text" id="clientId" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="30 lowercase letters and digits">
+          <div class="row"><button id="bSaveClient" class="primary">Save Client ID</button></div>
+          <div class="out" id="o2"></div>
+        </li>
+        <li id="st3">
+          <div class="t">Authorize the enemy voice account</div>
+          <p class="note">Be logged in to Twitch in this browser as the account that will speak for the Gemma civilization in bigrigjay's chat. Scopes requested:</p>
+          <ul class="plain">
+            <li><code>user:read:chat</code> read chat through EventSub</li>
+            <li><code>user:write:chat</code> send chat messages (every send passes the action gate)</li>
+            <li><code>user:manage:whispers</code> the private command link with village.html (receive and answer whispers)</li>
+          </ul>
+          <div class="row"><button id="bAuthorize" class="primary">Authorize with Twitch</button></div>
+          <div class="out" id="o3"></div>
+        </li>
+        <li id="st4">
+          <div class="t">Verify account identity</div>
+          <div id="idBody" class="note">Waiting for authorization.</div>
+          <div class="row"><button id="bConfirm" class="primary">This is the enemy voice account</button><button id="bForget" class="danger">Wrong account: forget token</button></div>
+          <div class="out" id="o4"></div>
+        </li>
+        <li id="st5">
+          <div class="t">Resolve the opponent to a numeric user id</div>
+          <input type="text" id="oppLogin" autocomplete="off" autocapitalize="off" spellcheck="false" value="bigrigjay">
+          <div class="row"><button id="bResolve" class="primary">Resolve</button></div>
+          <p class="note">Authority is the numeric id. A display name that says "bigrigjay" proves nothing.</p>
+          <div class="out" id="o5"></div>
+        </li>
+        <li id="st6">
+          <div class="t">Test EventSub</div>
+          <p class="note">Opens the controller's EventSub WebSocket and subscribes: your own chat, the opponent's chat, your whispers.</p>
+          <div class="row"><button id="bEdge" class="primary">Connect EventSub</button></div>
+          <div id="subsBody" class="note"></div>
+        </li>
+        <li id="st7">
+          <div class="t">Test chat read</div>
+          <p class="note">Needs one real chat message. Type anything in <a id="ownChatLink" href="#" target="_blank" rel="noopener">your own channel's chat</a>, or wait for one in the opponent's chat.</p>
+          <div id="readBody" class="note"></div>
+        </li>
+        <li id="st8">
+          <div class="t">Test chat send</div>
+          <p class="note">Sends one deliberate <code>EXP0 TEST</code> message through the action gate. Your own channel first; the opponent's chat is locked until the streamer's permission is recorded below.</p>
+          <div class="row"><button id="bSendSelf" class="primary">Send TEST to my own channel</button><button id="bSendOpp">Send TEST to the opponent's chat</button></div>
+          <div id="sendBody" class="note"></div>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h3>STREAMER PERMISSION <span class="badge" id="bPerm"></span></h3>
+      <p class="note">The machine speaks in the opponent's chat only with the streamer's explicit permission (FOUNDATION.md). Record who said yes, where, and when.</p>
+      <textarea id="permHow" placeholder="e.g. bigrigjay agreed on stream 2026-09-30 to play EXP0 against Gemma; enemy account may post game messages in his chat."></textarea>
+      <div class="chk"><input type="checkbox" id="permYes"><label for="permYes">The streamer explicitly permitted this account to post game messages in his chat.</label></div>
+      <div class="row"><button id="bPerm1" class="primary">Record permission</button><button id="bPerm0" class="danger">Withdraw</button></div>
+      <div class="out" id="oPerm"></div>
+    </section>
+
+    <section>
+      <h3>VILLAGE INVITE &middot; private command link <span class="badge" id="bGame"></span></h3>
+      <p class="note">Creates a game session and an invite for village.html. The streamer opens it, signs in with Twitch, and his commands reach this controller as whispers from his account; the controller answers with ACK whispers. Only whispers from the opponent's numeric id count.</p>
+      <div class="row"><button id="bNewGame" class="primary">New game session</button><button id="bCopyInvite" disabled>Copy invite link</button></div>
+      <pre id="invite" class="hide"></pre>
+      <div id="gameBody" class="note"></div>
+      <table id="cmdTable" class="hide"><thead><tr><th>time</th><th>from</th><th>seq</th><th>type</th><th>decision</th></tr></thead><tbody></tbody></table>
+      <p class="note">Whisper rules (Twitch): the <u>sender</u> needs a verified phone number; the first whisper to someone is limited to 500 characters; 3 per second, 100 per minute, 40 new recipients per day; Twitch may drop a whisper silently and still answer 204, so village.html retries the same sequence number until it sees the ACK. If a whisper is refused with 403, the recipient may be blocking whispers from strangers.</p>
+    </section>
+
+    <section>
+      <h3>LM STUDIO &middot; Gemma host <span class="badge" id="bLm"></span></h3>
+      <div class="kv"><div>url</div><div id="lmUrl">&mdash;</div><div>models</div><div id="lmModels">&mdash;</div></div>
+      <div class="row"><button id="bLm1" class="primary">Check LM Studio</button></div>
+      <p class="note">Must stay on this machine: in LM Studio keep "Serve on Local Network" off. Start its server from the Developer tab or with <code>lms server start</code>. <code>./exp0 doctor</code> checks that it is not reachable from the network.</p>
+    </section>
+
+    <section>
+      <h3>CONTROLS</h3>
+      <div class="row">
+        <button id="bEstop" class="estop">&#9632; E-STOP</button>
+        <button id="bEstopClear" class="hide">clear e-stop</button>
+        <button id="bEdgeStop">Disconnect EventSub</button>
+        <button id="bRevoke" class="danger">Revoke token at Twitch</button>
+      </div>
+      <p class="note">E-STOP: no further external actions (chat or whispers) until cleared. Incoming commands are logged but not applied or answered; the village retries after you clear it.</p>
+    </section>
+
+    <section>
+      <h3>EVIDENCE &middot; append-only history <span class="badge" id="bHist"></span></h3>
+      <div id="tail"></div>
+      <p class="note">Full file on the Debian machine: <code>var/history.ndjson</code> (<code>./exp0 logs</code>).</p>
+    </section>
+  </div>
+
+  <div class="zone ally">
+    <h2 class="zone-h">WAR COUNCIL <span>in-game ally &middot; advise Gemma, never puppet it</span></h2>
+    <section>
+      <p>Not built yet. This zone arrives with gates G8&ndash;G12: Gemma's legal view of its civilization, its requests to you, your advice and the intelligence you may legally share. You will not be able to issue Gemma's orders from here; that would be puppeting.</p>
+    </section>
+  </div>
+</main>
+
+<script>
+'use strict';
+const SS = window.sessionStorage;
+const K = { ctl: 'exp0.ally.ctl', state: 'exp0.ally.oauth_state', app: 'exp0.ally.appname' };
+const PAGE_URL = location.origin + location.pathname;
+const VILLAGE_URL = PAGE_URL.replace(/ally\.html$/, 'village.html');
+const $ = id => document.getElementById(id);
+let CTL = null, ST = null, conn = 'nolink', pendingToken = null, oauthNote = null, lastSeq = 0, busy = {};
+
+const ssGet = k => { try { return JSON.parse(SS.getItem(k)); } catch (e) { return null; } };
+const ssSet = (k, v) => { try { SS.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const rand = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
+
+// ---- fragment intake: controller link (#p=&k=) or Twitch OAuth return (#access_token=&state=).
+// Runs at load and on hashchange: pasting a new ./exp0 link into this same tab only changes the fragment.
+function intake() {
+  if (location.hash.length < 2) return false;
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search);
+  if (h.get('k')) {
+    const port = parseInt(h.get('p') || '8787', 10);
+    if (port > 0 && port < 65536 && /^[A-Za-z0-9_-]{20,100}$/.test(h.get('k'))) { CTL = { port, key: h.get('k') }; ssSet(K.ctl, CTL); lastSeq = 0; $('tail').textContent = ''; }
+  }
+  if (h.get('access_token')) {
+    const expected = ssGet(K.state); SS.removeItem(K.state);
+    if (!expected || h.get('state') !== expected) oauthNote = ['Discarded a token whose state this page did not issue. Press Authorize again.', 'bad'];
+    else pendingToken = h.get('access_token');
+  } else if (h.get('error')) {
+    SS.removeItem(K.state);
+    oauthNote = ['Twitch returned: ' + h.get('error') + ' ' + (h.get('error_description') || ''), 'bad'];
+  }
+  return true;
+}
+CTL = ssGet(K.ctl);
+intake();
+window.addEventListener('hashchange', () => { if (intake()) poll(); });
+
+async function api(method, path, body) {
+  if (!CTL) throw Object.assign(new Error('no_controller_link'), { status: -1 });
+  let r;
+  try {
+    r = await fetch('http://127.0.0.1:' + CTL.port + path, { method, cache: 'no-store',
+      headers: Object.assign({ 'Authorization': 'Bearer ' + CTL.key }, body ? { 'Content-Type': 'application/json' } : {}),
+      body: body ? JSON.stringify(body) : undefined });
+  } catch (e) { throw Object.assign(new Error('controller_unreachable'), { status: 0 }); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || ('HTTP ' + r.status)), { status: r.status, body: j });
+  return j;
+}
+
+function out(id, msg, cls) { const el = $(id); el.textContent = msg || ''; el.className = 'out' + (cls ? ' ' + cls : ''); }
+function stepState(id, st) { $(id).className = st || ''; }
+function pill(id, text, cls) { const el = $(id); el.textContent = text; el.className = 'pill' + (cls ? ' ' + cls : ''); }
+function badge(id, text, cls) { const el = $(id); el.textContent = text; el.className = 'badge' + (cls ? ' ' + cls : ''); }
+function banner(id, html, cls) { let b = $('bn-' + id); if (!html) { if (b) b.remove(); return; } if (!b) { b = document.createElement('div'); b.id = 'bn-' + id; $('banners').appendChild(b); } b.className = 'banner ' + (cls || ''); b.innerHTML = html; }
+
+async function act(key, fn, outId, okMsg) {
+  if (busy[key]) return; busy[key] = true;
+  try { const r = await fn(); if (outId) out(outId, typeof okMsg === 'function' ? okMsg(r) : (okMsg || 'Done.'), 'ok'); await poll(); return r; }
+  catch (e) { if (outId) out(outId, explain(e), 'bad'); await poll(); }
+  finally { busy[key] = false; }
+}
+
+function explain(e) {
+  const m = e.message;
+  const table = {
+    controller_unreachable: 'Cannot reach the controller on 127.0.0.1. Run ./exp0 status on the Debian machine.',
+    bad_session_key: 'The controller restarted and has a new key. Open the link printed by ./exp0 status.',
+    no_controller_link: 'Open this page through the link printed by ./exp0 start.',
+    bad_client_id: 'That is not a Twitch Client ID (20-64 lowercase letters and digits).',
+    twitch_rejected_token: 'Twitch rejected the token. Authorize again.',
+    token_issued_to_different_client_id: 'That token belongs to a different Twitch app than the saved Client ID.',
+    wrong_twitch_account: 'A game session is bound to a different Twitch account. Log out of Twitch in this browser, log in as the bound account, authorize again - or create a new game session after confirming this account.',
+    no_valid_token: 'Authorize with Twitch first (step 3).', identity_not_confirmed: 'Confirm the account identity first (step 4).',
+    opponent_not_resolved: 'Resolve the opponent first (step 5).', no_client_id: 'Save the Client ID first (step 2).',
+    no_such_twitch_user: 'Twitch has no user with that login.', statement_required: 'Write how the permission was given (at least a sentence).',
+    game_bound_to_other_account: 'The active game session is bound to a different account.'
+  };
+  return (table[m] || m) + (e.status > 0 ? ' (HTTP ' + e.status + ')' : '');
+}
+
+// ---- polling + render
+async function poll() {
+  try { ST = await api('GET', '/v1/status'); conn = 'ok'; }
+  catch (e) { ST = null; conn = e.status === 401 ? 'badkey' : (e.status === -1 ? 'nolink' : 'down'); }
+  if (ST && pendingToken) {
+    const t = pendingToken; pendingToken = null;
+    try { const r = await api('POST', '/v1/op/twitch/token', { access_token: t }); oauthNote = ['Token handed to the controller and validated by Twitch: ' + r.login + ' (' + r.user_id + '). It is kept in the controller\'s memory only.', 'ok']; ST = await api('GET', '/v1/status'); }
+    catch (e) { oauthNote = ['Controller refused the token: ' + explain(e), 'bad']; }
+  }
+  render();
+  if (ST) tail();
+}
+
+function render() {
+  const s = ST;
+  $('redirAlly').textContent = PAGE_URL; $('redirVillage').textContent = VILLAGE_URL;
+  if (!ssGet(K.app)) ssSet(K.app, 'exp0-' + rand(3));
+  $('appName').textContent = ssGet(K.app);
+  // controller link
+  if (conn === 'ok') {
+    pill('pCtl', 'controller ' + s.exp0 + ' :' + CTL.port, 'ok'); badge('bCtl', 'connected', 'ok');
+    $('ctlBody').innerHTML = '<div class="kv"><div>address</div><div>127.0.0.1:' + CTL.port + ' (loopback only)</div><div>role</div><div>' + esc(s.role) + '</div><div>uptime</div><div>' + s.uptime_s + 's, pid ' + s.pid + '</div></div>';
+    banner('ctl', null);
+  } else {
+    pill('pCtl', 'controller ' + conn, 'bad'); badge('bCtl', conn === 'nolink' ? 'no link' : conn, 'bad');
+    const msg = {
+      nolink: 'Run <code>./setup.sh</code> once, then <code>./exp0 start</code> on the Debian machine, and open the link it prints (it ends with <code>#p=&hellip;&amp;k=&hellip;</code>). The key after # never leaves this browser.',
+      badkey: 'The controller restarted and now has a different key. Open the link printed by <code>./exp0 status</code>.',
+      down: 'Cannot reach <code>http://127.0.0.1:' + (CTL ? CTL.port : 8787) + '</code>. Check <code>./exp0 status</code>. In Chrome 142 and later, this page also needs permission to reach apps on this device: when Chrome asks, choose Allow; if you blocked it, open the site settings for raw.githack.com (icon left of the address), allow Local network access, and reload.'
+    }[conn];
+    $('ctlBody').innerHTML = '<p>' + msg + '</p>';
+    banner('ctl', msg, conn === 'nolink' ? 'warn' : '');
+  }
+  if (oauthNote) out('o3', oauthNote[0], oauthNote[1]);
+  const on = !!s;
+  ['bSaveClient', 'bAuthorize', 'bConfirm', 'bForget', 'bResolve', 'bEdge', 'bSendSelf', 'bSendOpp', 'bPerm1', 'bPerm0', 'bNewGame', 'bLm1', 'bEstop', 'bEdgeStop', 'bRevoke'].forEach(id => { $(id).disabled = !on; });
+  if (!s) { ['st1', 'st2', 'st3', 'st4', 'st5', 'st6', 'st7', 'st8'].forEach(id => stepState(id, '')); badge('bTw', 'controller needed', ''); return; }
+
+  const c = s.config, tw = s.twitch, ed = s.edge, t = s.tests;
+  // 1-2 app + client id
+  stepState('st1', c.client_id ? 'ok' : 'wait'); stepState('st2', c.client_id ? 'ok' : '');
+  if (c.client_id && document.activeElement !== $('clientId')) $('clientId').value = c.client_id;
+  $('bAuthorize').disabled = !c.client_id;
+  // 3 authorize
+  const authOk = tw.valid && !tw.missing_scopes.length;
+  stepState('st3', authOk ? 'ok' : (tw.token ? 'bad' : ''));
+  if (tw.token && !tw.valid) out('o3', 'The controller holds a token Twitch no longer accepts. Authorize again.', 'bad');
+  else if (tw.valid && tw.missing_scopes.length) out('o3', 'Missing scopes: ' + tw.missing_scopes.join(' ') + '. Authorize again and approve all of them.', 'bad');
+  // 4 identity
+  const idOk = tw.valid && c.self_id && c.self_id === tw.user_id;
+  stepState('st4', idOk ? 'ok' : (tw.valid ? 'wait' : ''));
+  $('idBody').innerHTML = tw.token ? ('Twitch says this token belongs to <b>' + esc(tw.login) + '</b> (numeric id <code>' + esc(tw.user_id) + '</code>).' +
+    (idOk ? ' Confirmed as the enemy voice account.' : (c.self_id ? ' <b style="color:var(--warn)">Previously confirmed account: ' + esc(c.self_login) + ' (' + esc(c.self_id) + ').</b>' : ''))) : 'Waiting for authorization.';
+  $('bConfirm').disabled = !tw.valid || idOk; $('bForget').disabled = !tw.token;
+  // 5 opponent
+  stepState('st5', c.opponent_id ? 'ok' : '');
+  if (c.opponent_id) { out('o5', c.opponent_login + ' → ' + c.opponent_id + (c.opponent_display ? '  (display name "' + c.opponent_display + '")' : ''), 'ok'); if (document.activeElement !== $('oppLogin')) $('oppLogin').value = c.opponent_login; }
+  $('bResolve').disabled = !tw.valid;
+  // 6 eventsub
+  const subs = ed.subs || {};
+  const subNames = { own_chat: 'your chat', opponent_chat: 'opponent chat', whispers: 'whispers' };
+  $('subsBody').innerHTML = (ed.running || Object.keys(subs).length) ? ('<div class="kv"><div>connection</div><div>' + (ed.connected ? 'connected, session ' + esc(ed.session_id) : (ed.running ? 'connecting&hellip;' : 'stopped')) + (ed.reconnects ? ' &middot; reconnects ' + ed.reconnects : '') + (ed.error && !ed.connected ? ' &middot; last error: ' + esc(ed.error) : '') + '</div>' +
+    Object.keys(subs).map(k => '<div>' + esc(subNames[k] || k) + '</div><div>' + esc(subs[k].status) + (subs[k].error ? ' &middot; ' + esc(subs[k].error) + ' (HTTP ' + subs[k].http + ')' : '') + '</div>').join('') + '</div>') : '';
+  const allSubs = Object.keys(subs).length > 0 && Object.values(subs).every(x => x.status === 'enabled');
+  stepState('st6', ed.connected && allSubs ? 'ok' : (ed.running ? 'wait' : ''));
+  $('bEdge').disabled = !idOk || ed.running;
+  $('ownChatLink').href = tw.login ? 'https://www.twitch.tv/popout/' + encodeURIComponent(tw.login) + '/chat' : 'https://www.twitch.tv/';
+  // 7 read
+  const rd = t.chat_read;
+  stepState('st7', rd && rd.ok ? 'ok' : (ed.connected ? 'wait' : ''));
+  $('readBody').innerHTML = (rd && rd.ok ? '<p style="color:var(--ok)">Received: [' + esc(rd.channel_role) + ' ' + esc(rd.channel_login) + '] ' + esc(rd.chatter) + ': ' + esc(rd.text) + ' (history seq ' + rd.seq + ')</p>' : (ed.connected ? '<p>Listening&hellip;</p>' : '')) +
+    (s.recent_chat.length ? '<table><tbody>' + s.recent_chat.slice(-6).reverse().map(m => '<tr><td>' + esc(m.channel_role) + '</td><td>' + esc(m.chatter) + (m.is_self ? ' (you)' : '') + '</td><td>' + esc(m.text) + '</td></tr>').join('') + '</tbody></table>' : '');
+  // 8 send
+  const sd = t.chat_send;
+  stepState('st8', sd && sd.ok ? 'ok' : (sd && sd.admitted === false ? 'bad' : ''));
+  $('sendBody').innerHTML = sd ? ('<p>' + (sd.admitted === false ? '<span style="color:var(--bad)">Refused by the action gate: ' + esc((sd.reasons || []).join(', ')) + '</span>' :
+    'Sent to ' + esc(sd.target) + ': "' + esc(sd.text) + '" &middot; HTTP ' + sd.http + ' &middot; is_sent=' + sd.is_sent + (sd.drop_reason ? ' &middot; dropped: ' + esc(JSON.stringify(sd.drop_reason)) : '') + ' &middot; ' + (sd.echo ? '<span style="color:var(--ok)">seen in chat (seq ' + sd.echo_seq + ')</span>' : 'waiting to see it in chat&hellip;')) + '</p>') : '';
+  const perm = c.permission && c.permission.granted;
+  $('bSendSelf').disabled = !ed.connected; $('bSendOpp').disabled = !ed.connected || !perm;
+  // ready?
+  const ready = c.client_id && authOk && idOk && c.opponent_id && ed.connected && allSubs && rd && rd.ok && sd && sd.ok;
+  badge('bTw', ready ? 'TWITCH READY' : 'in progress', ready ? 'ok' : 'warn');
+  banner('ready', ready ? 'TWITCH READY &middot; ' + esc(tw.login) + ' (' + esc(tw.user_id) + ') reads and writes chat, opponent ' + esc(c.opponent_login) + ' = ' + esc(c.opponent_id) : null, 'ok');
+  pill('pTw', tw.valid ? 'twitch ' + tw.login : (tw.token ? 'twitch INVALID' : 'twitch -'), tw.valid ? 'ok' : (tw.token ? 'bad' : ''));
+  pill('pEdge', ed.connected ? 'edge connected' : (ed.running ? 'edge connecting' : 'edge off'), ed.connected ? 'ok' : (ed.running ? 'warn' : ''));
+  // permission
+  badge('bPerm', perm ? 'recorded ' + c.permission.recorded_at.slice(0, 10) : 'not recorded', perm ? 'ok' : 'warn');
+  if (c.permission && document.activeElement !== $('permHow') && !$('permHow').value) $('permHow').value = c.permission.statement || '';
+  // game
+  const g = s.game;
+  pill('pGame', g ? 'game ' + g.sid + (g.joined ? ' joined' : '') : 'game -', g ? (g.joined ? 'ok' : 'warn') : '');
+  badge('bGame', g ? (g.joined ? 'opponent joined' : 'waiting for opponent') : 'no session', g ? (g.joined ? 'ok' : 'warn') : '');
+  $('bNewGame').disabled = !(idOk && c.opponent_id && c.client_id);
+  $('invite').textContent = g ? g.invite : ''; $('invite').classList.toggle('hide', !g); $('bCopyInvite').disabled = !g;
+  $('gameBody').innerHTML = g ? ('<div class="kv"><div>session</div><div>' + esc(g.sid) + ' &middot; created ' + esc(g.created_at) + '</div><div>opponent</div><div>' + esc(g.opponent_login) + ' (' + esc(g.opponent_id) + ')</div><div>joined</div><div>' + (g.joined ? esc(g.joined.at) + ' as ' + esc(g.joined.login) : 'not yet') + '</div><div>last seq</div><div>' + g.last_seq + '</div><div>ACK queue</div><div>' + s.whisper_queue + '</div></div>' +
+    (VILLAGE_URL !== c.village_url ? '<p style="color:var(--warn)">Note: this page is ' + esc(PAGE_URL) + ' but invites point to ' + esc(c.village_url) + ' (var/config.json village_url).</p>' : '')) : '';
+  const rows = (s.recent_commands || []).slice().reverse();
+  $('cmdTable').classList.toggle('hide', !rows.length);
+  $('cmdTable').querySelector('tbody').innerHTML = rows.map(r => '<tr><td>' + esc((r.t || '').slice(11, 19)) + '</td><td>' + esc(r.from) + '</td><td>' + esc(r.seq == null ? '' : r.seq) + '</td><td>' + esc(r.type || '') + '</td><td style="color:' + (r.admitted ? 'var(--ok)' : 'var(--bad)') + '">' + (r.admitted ? 'applied' : esc((r.reasons || []).join(', '))) + '</td></tr>').join('');
+  // lm studio
+  const lm = s.lmstudio;
+  $('lmUrl').textContent = c.lmstudio_url;
+  $('lmModels').textContent = lm ? (lm.reachable ? (lm.models.join(', ') || '(server up, no model loaded)') : 'unreachable: ' + lm.error) : 'not checked yet';
+  badge('bLm', lm ? (lm.reachable ? 'reachable' : 'unreachable') : 'not checked', lm ? (lm.reachable ? 'ok' : 'bad') : '');
+  pill('pLm', lm ? (lm.reachable ? 'lm studio up' : 'lm studio down') : 'lm studio ?', lm ? (lm.reachable ? 'ok' : 'bad') : '');
+  // e-stop
+  pill('pEstop', s.estop ? 'E-STOP' : 'e-stop off', s.estop ? 'bad' : '');
+  $('bEstop').classList.toggle('hide', s.estop); $('bEstopClear').classList.toggle('hide', !s.estop); $('bEstopClear').disabled = false;
+  banner('estop', s.estop ? 'EMERGENCY STOP is set. No chat messages or whispers leave this machine until you clear it.' : null, '');
+  banner('hist', s.history.ok ? null : 'HISTORY CANNOT BE WRITTEN. The action gate refuses all external actions until this is fixed (disk full?).', '');
+  badge('bHist', 'seq ' + s.history.seq, s.history.ok ? '' : 'bad');
+  $('bEdgeStop').disabled = !ed.running; $('bRevoke').disabled = !tw.token;
+}
+
+// ---- evidence tail
+function brief(r) {
+  const d = r.data || {};
+  switch (r.kind) {
+    case 'event': return d.duplicate ? 'DUPLICATE dropped ' + (d.message_id || '') : '[' + d.channel_role + ' ' + (d.channel_login || '') + '] ' + (d.chatter_name || '?') + (d.is_self ? ' (self)' : '') + ': ' + d.text;
+    case 'command': return d.duplicate_delivery ? 'DUPLICATE whisper delivery dropped' : 'whisper from ' + d.from_user_login + ' (' + d.from_user_id + ', shown as "' + d.from_user_name + '"): ' + d.text;
+    case 'admission': return (d.admitted ? 'ADMIT ' : 'REJECT ') + (d.proposal_id || ('whisper ' + (d.seq != null ? 'seq ' + d.seq + ' ' : '') + (d.type || ''))) + (d.reasons && d.reasons.length ? ' : ' + d.reasons.join(', ') : '');
+    case 'applied': return 'APPLIED seq ' + d.seq + ' ' + d.type + ' ok=' + d.ok + ' ' + JSON.stringify(d.result);
+    case 'proposal': return d.action_type + ' ' + (d.channel || ('to ' + d.to_user_id)) + ' "' + d.message + '" [' + d.reason + ']';
+    case 'action': return d.method + ' ' + d.url.replace(/^https:\/\/api\.twitch\.tv/, '') + ' ' + JSON.stringify(d.body);
+    case 'result': return d.confirmed_by_event ? 'CONFIRMED in chat ' + d.message_id : 'HTTP ' + d.http + (d.is_sent != null ? ' is_sent=' + d.is_sent : '') + (d.error ? ' ' + d.error : '');
+    default: return (d.op || '') + ' ' + JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k]) => k !== 'op')));
+  }
+}
+async function tail() {
+  try {
+    const r = await api('GET', '/v1/history?after=' + lastSeq + '&limit=150');
+    const el = $('tail'); const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+    for (const rec of r.records) {
+      lastSeq = Math.max(lastSeq, rec.seq);
+      const div = document.createElement('div'); div.className = 'k-' + rec.kind;
+      div.textContent = rec.seq + ' ' + (rec.t || '').slice(11, 19) + ' ' + rec.kind.toUpperCase() + ' ' + brief(rec);
+      el.appendChild(div);
+    }
+    while (el.childElementCount > 400) el.removeChild(el.firstChild);
+    if (stick) el.scrollTop = el.scrollHeight;
+  } catch (e) {}
+}
+
+// ---- wiring
+document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = 'copied'; setTimeout(() => b.textContent = 'copy', 1500); } catch (e) { b.textContent = 'select + copy manually'; } });
+$('bSaveClient').onclick = () => act('client', () => api('POST', '/v1/op/client_id', { client_id: $('clientId').value.trim() }), 'o2', 'Saved in var/config.json (Client IDs are public).');
+$('bAuthorize').onclick = () => {
+  if (!ST || !ST.config.client_id) return;
+  const state = rand(16); ssSet(K.state, state);
+  const q = new URLSearchParams({ response_type: 'token', client_id: ST.config.client_id, redirect_uri: PAGE_URL, scope: ST.required_scopes.join(' '), state, force_verify: 'true' });
+  location.assign('https://id.twitch.tv/oauth2/authorize?' + q.toString());
+};
+$('bConfirm').onclick = () => act('confirm', () => api('POST', '/v1/op/identity/confirm'), 'o4', r => 'Confirmed: ' + r.self_login + ' (' + r.self_id + ') is the enemy voice account.');
+$('bForget').onclick = () => act('forget', () => api('POST', '/v1/op/twitch/forget', { revoke: true }), 'o4', 'Token revoked and forgotten. Log out of Twitch in this browser, log in as the right account, then Authorize again.');
+$('bResolve').onclick = () => act('resolve', () => api('POST', '/v1/op/opponent', { login: $('oppLogin').value }), 'o5', r => r.login + ' → ' + r.id);
+$('bEdge').onclick = () => act('edge', () => api('POST', '/v1/op/edge/start'));
+$('bSendSelf').onclick = () => act('send', () => api('POST', '/v1/op/test/send', { target: 'self' }));
+$('bSendOpp').onclick = () => act('send', () => api('POST', '/v1/op/test/send', { target: 'opponent' }));
+$('bPerm1').onclick = () => { if (!$('permYes').checked) { out('oPerm', 'Tick the box to confirm the permission is explicit.', 'bad'); return; } act('perm', () => api('POST', '/v1/op/permission', { granted: true, statement: $('permHow').value }), 'oPerm', 'Recorded in var/config.json and in history.'); };
+$('bPerm0').onclick = () => act('perm', () => api('POST', '/v1/op/permission', { granted: false, statement: $('permHow').value }), 'oPerm', 'Withdrawn: sending to the opponent\'s chat is locked.');
+$('bNewGame').onclick = () => { if (ST && ST.game && !confirm('Replace the current game session? The old invite stops working.')) return; act('game', () => api('POST', '/v1/op/game/new')); };
+$('bCopyInvite').onclick = async () => { try { await navigator.clipboard.writeText($('invite').textContent); $('bCopyInvite').textContent = 'copied'; setTimeout(() => $('bCopyInvite').textContent = 'Copy invite link', 1500); } catch (e) {} };
+$('bLm1').onclick = () => act('lm', () => api('POST', '/v1/op/lmstudio/probe'));
+$('bEstop').onclick = () => act('estop', () => api('POST', '/v1/op/estop'));
+$('bEstopClear').onclick = () => act('estop', () => api('POST', '/v1/op/estop/clear'));
+$('bEdgeStop').onclick = () => act('edge', () => api('POST', '/v1/op/edge/stop'));
+$('bRevoke').onclick = () => { if (confirm('Revoke the Twitch token? Everything that talks to Twitch stops until you authorize again.')) act('forget', () => api('POST', '/v1/op/twitch/forget', { revoke: true })); };
+
+render();
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

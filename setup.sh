@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# EXP0 - the one supported entrypoint.
+#
+#   ./setup.sh                      interactive role selection
+#   ./setup.sh --role all-in-one    Debian runs the whole system (the only role built so far)
+#   ./setup.sh --port 8787          loopback port for the controller (default 8787)
+#
+# Generates ./exp0 (start | stop | restart | status | logs | doctor). Safe to re-run.
+# Debian alone must run the whole system. Termux may offload later; it is never required.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+ROLE=""
+PORT=""
+YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --role) ROLE="${2:-}"; shift 2 ;;
+    --role=*) ROLE="${1#*=}"; shift ;;
+    --port) PORT="${2:-}"; shift 2 ;;
+    --port=*) PORT="${1#*=}"; shift ;;
+    --yes|-y) YES=1; shift ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+ok()      { printf '  PASS  %s\n' "$*"; }
+warn()    { printf '  WARN  %s\n' "$*"; }
+die()     { printf '  FAIL  %s\n' "$*" >&2; exit 1; }
+pending() { printf '  STOP  %s\n' "$*" >&2; exit 3; }
+
+echo "EXP0 setup"
+
+# ---- platform ------------------------------------------------------------------------------
+PLATFORM=unknown
+OS_ID="" OS_VER="" OS_NAME="" OS_LIKE=""
+TERMUX_PREFIX="${PREFIX:-}"
+if [ -n "${TERMUX_VERSION:-}" ] || [ "$TERMUX_PREFIX" != "${TERMUX_PREFIX#*com.termux}" ]; then
+  PLATFORM=termux
+elif [ -r /etc/os-release ]; then
+  OS_ID="$(. /etc/os-release; echo "${ID:-}")"
+  OS_VER="$(. /etc/os-release; echo "${VERSION_ID:-}")"
+  OS_NAME="$(. /etc/os-release; echo "${PRETTY_NAME:-}")"
+  OS_LIKE="$(. /etc/os-release; echo "${ID_LIKE:-}")"
+  case " $OS_ID $OS_LIKE " in *" debian "*) PLATFORM=debian ;; esac
+fi
+ARCH="$(uname -m)"
+case "$PLATFORM" in
+  debian)
+    if [ "$OS_ID" = debian ] && [ "$OS_VER" = 13 ] && [ "$ARCH" = x86_64 ]; then
+      ok "platform: Debian 13 $ARCH (reference platform)"
+    else
+      warn "platform: ${OS_NAME:-debian family} $ARCH is not the reference platform (Debian 13 x86-64); continuing"
+    fi ;;
+  termux) ok "platform: Android / Termux ($ARCH)" ;;
+  *) die "unsupported platform: EXP0 targets Debian 13 x86-64 (core) or Android/Termux (optional edge)" ;;
+esac
+
+# ---- role ----------------------------------------------------------------------------------
+if [ -z "$ROLE" ]; then
+  if [ "$PLATFORM" = termux ]; then
+    ROLE=edge
+  elif [ "$YES" = 1 ] || [ ! -t 0 ]; then
+    ROLE=all-in-one
+  else
+    echo "Choose a role for this machine:"
+    echo "  1) all-in-one  Debian runs everything: controller, Twitch edge, LM Studio/Gemma  (built)"
+    echo "  2) core        Debian runs canonical state + Gemma; a Termux phone runs the Twitch edge  (not built yet)"
+    printf 'role [1]: '
+    read -r ans || ans=""
+    case "${ans:-1}" in
+      1|all-in-one) ROLE=all-in-one ;;
+      2|core) ROLE=core ;;
+      *) die "unknown choice: $ans" ;;
+    esac
+  fi
+fi
+case "$PLATFORM:$ROLE" in
+  debian:all-in-one) ok "role: all-in-one (Debian runs the whole system)" ;;
+  debian:core) pending "role core needs the Termux edge pairing link, which is not built yet. Use --role all-in-one." ;;
+  termux:edge) pending "role edge (Termux) is not built yet. EXP0 does not need Termux: run ./setup.sh on the Debian machine." ;;
+  *) die "role '$ROLE' is not valid on $PLATFORM (debian: all-in-one | core, termux: edge)" ;;
+esac
+
+# ---- python --------------------------------------------------------------------------------
+PY="$(command -v python3 || true)"
+if [ -z "$PY" ]; then
+  if [ "$PLATFORM" = termux ]; then die "python3 not found: pkg install python"; fi
+  die "python3 not found: sudo apt install python3"
+fi
+"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
+  || die "python >= 3.11 required, found $("$PY" -V 2>&1) (Debian 13 ships 3.13)"
+"$PY" -c 'import ssl, json, http.server, urllib.request, socket, hashlib' \
+  || die "python is missing standard modules (ssl?); Debian: sudo apt install python3"
+ok "python: $("$PY" -c 'import sys; print(sys.version.split()[0])') at $PY (standard library only, nothing to install)"
+
+command -v tail >/dev/null 2>&1 || warn "'tail' not found: ./exp0 logs will not work"
+command -v git >/dev/null 2>&1 || warn "'git' not found: ./exp0 doctor cannot check that secrets are untracked"
+
+# ---- local state ---------------------------------------------------------------------------
+mkdir -p var
+chmod 700 var
+"$PY" -m py_compile controller/exp0d.py || die "controller/exp0d.py does not compile"
+rm -rf controller/__pycache__
+if [ -n "$PORT" ]; then
+  "$PY" controller/exp0d.py init --role "$ROLE" --port "$PORT" || die "config init failed"
+else
+  "$PY" controller/exp0d.py init --role "$ROLE" || die "config init failed"
+fi
+ok "var/ is local-only (mode 700, gitignored): config, history, session key"
+
+# ---- lifecycle interface -------------------------------------------------------------------
+cat > exp0 <<EOF
+#!/usr/bin/env bash
+# Generated by ./setup.sh $(date -u +%Y-%m-%dT%H:%M:%SZ) for role $ROLE on $PLATFORM. Re-run ./setup.sh to regenerate.
+set -euo pipefail
+cd "\$(dirname "\$0")"
+case "\${1:-}" in
+  start|stop|restart|status|logs|doctor) exec "$PY" controller/exp0d.py "\$@" ;;
+  *) echo "usage: ./exp0 start | stop | restart | status | logs | doctor" >&2; exit 2 ;;
+esac
+EOF
+chmod +x exp0
+ok "generated ./exp0 (start | stop | restart | status | logs | doctor)"
+
+echo
+echo "Next:"
+echo "  ./exp0 start     starts the controller on 127.0.0.1 and prints your ally.html link"
+echo "  ./exp0 doctor    checks Twitch reachability, LM Studio, and that nothing listens on the network"

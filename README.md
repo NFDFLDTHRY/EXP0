@@ -1,101 +1,77 @@
-# EXP0 — Twitch Interaction Machine
+# EXP0: user + Gemma 4 vs bigrigjay + Twitch chat
 
-The smallest auditable machine that lets a bot observe and interact with a Twitch
-channel under explicit permission from the streamer. Read `FOUNDATION.md` first;
-everything here exists to serve it.
+Can a small local Gemma model run a coherent RTS civilization, cooperate with one human ally, reason under
+fog of war, and fight a streamer-led civilization whose social intelligence comes from Twitch?
+The full map is [`CONTEXT_PASS_V1.md`](CONTEXT_PASS_V1.md); the rules for the Twitch machinery are
+[`FOUNDATION.md`](FOUNDATION.md); what is proven so far is in [`GATES.md`](GATES.md).
 
-Two single-file HTML apps, distributed as githack links (no server, no build):
+**Current state: the wiring (gates G0–G7).** Gemma, the world engine and the game itself are not built yet.
+Wiring first, then war.
 
-| link | role |
-|---|---|
-| **entry** — https://raw.githack.com/NFDFLDTHRY/EXP0/main/setup.html | Walks through the Twitch developer-account integration, obtains the token (implicit grant), resolves the target channel, records streamer permission, runs pre-flight. |
-| **machine** — https://raw.githack.com/NFDFLDTHRY/EXP0/main/machine.html | The fixed control plane: EventSub input → normalizer → session controller → behavior worker → action gate → Twitch sender, with append-only history and the first-admission-tests checklist. |
+## The two links
 
-Both pages are served from the same origin (`raw.githack.com`) and share that
-origin's `localStorage` (keys `tim.*`). The token never enters history.
+| link | side | what it does now |
+|---|---|---|
+| **ally.html** — https://raw.githack.com/NFDFLDTHRY/EXP0/main/ally.html | you + Gemma (the enemy civilization, from Jay's point of view) | Twitch setup wizard to **TWITCH READY**, streamer-permission record, village invite, LM Studio check, E-STOP, evidence tail. Talks only to your controller on 127.0.0.1 |
+| **village.html** — https://raw.githack.com/NFDFLDTHRY/EXP0/main/village.html | bigrigjay | signs in with Twitch, joins your game session, sends sequenced commands to your controller as whispers and waits for ACKs |
 
-Target channel for this experiment: `bigrigjay` (https://m.twitch.tv/bigrigjay).
+Open ally.html through the link that `./exp0 start` prints: its `#p=…&k=…` part carries the controller's
+ephemeral key and never leaves your browser.
+
+## Start (Debian 13 x86-64)
+
+```sh
+git clone https://github.com/NFDFLDTHRY/EXP0 && cd EXP0
+./setup.sh            # the one supported entrypoint; checks the machine, writes var/, generates ./exp0
+./exp0 start          # controller on 127.0.0.1:8787, prints your ally.html link
+./exp0 doctor         # Twitch really answering, LM Studio, nothing listening on the network
+```
+
+Then in ally.html, top to bottom: register the Twitch app (the page shows the two exact redirect URLs,
+the name, Category *Chat Bot*, Client Type *Public*) → Client ID → Authorize → confirm the account →
+resolve bigrigjay → Test EventSub → Test chat read → Test chat send → **TWITCH READY**. Then *New game
+session* and send the invite link to the streamer.
+
+`./exp0 start | stop | restart | status | logs | doctor`. Python 3.11+ standard library only; nothing to install.
+Termux is optional and not built yet: `setup.sh` says so and stops. Debian alone runs everything.
+
+If you registered a Twitch app for the earlier V0 page, reuse it: add the two V1 redirect URLs to the same app.
+V0 (browser-only machine) is frozen at commit `0899498`:
+https://rawcdn.githack.com/NFDFLDTHRY/EXP0/0899498482f5311a4cc2788f4b223802798c83fd/setup.html
 
 ## Files
 
 ```
-FOUNDATION.md       the design; read first
-setup.html          entry link (Twitch dev-account integration + OAuth + pre-flight)
-machine.html        the machine (control plane, gate, sender, history, self-tests)
-behaviors/observe.js   v0 behavior: proposes nothing (input-side proof)
-behaviors/ping.js      smallest full-path behavior: "!ping" -> reply "pong"
-BEHAVIOR_SLOT.md    template + the source contract for new behaviors
+setup.sh              the one supported entrypoint (generates ./exp0)
+controller/exp0d.py   the controller: loopback API, Twitch edge (EventSub WebSocket), action gate,
+                      whisper command link, append-only history, LM Studio probe, lifecycle, doctor
+ally.html             GitHack surface 1: operator + (later) war council
+village.html          GitHack surface 2: bigrigjay's side
+GATES.md              gate ledger: proven / simulated / pending / not built
+CONTEXT_PASS_V1.md    the architecture map (V1)
+FOUNDATION.md         authority, evidence and failure rules for the Twitch machinery
+tests/                proof harness (dev only): fake Twitch + fake LM Studio + end-to-end run, and its evidence
+var/                  created by setup.sh, never committed: config, state, history.ndjson, session key
 ```
 
-## Bring-up
+## Security boundary
 
-1. Open the **entry** link on the phone (Chrome). Step 0 shows the exact redirect URL.
-2. Twitch: enable 2FA on the account that will own the app, then register the app
-   at https://dev.twitch.tv/console/apps/create — Name (unique), OAuth Redirect URL
-   = the URL from step 0 (press *Add*), Category *Chat Bot*, Client Type **Public**.
-   Copy the Client ID. (Client type cannot be changed later.)
-3. Entry step 3: paste the Client ID. Step 4: *Authorize* — log in as the account
-   that should speak in chat (that account becomes the bot identity). Scopes:
-   `user:read:chat`, `user:write:chat`.
-4. Step 5: resolve `bigrigjay` → broadcaster id. Step 6: record how/when the
-   streamer permitted the bot (the machine refuses to enable `send` without it).
-5. Step 7: pre-flight → *Open the machine*.
-6. Machine: **run offline self-test** (proves t4, t6, t9, t10, t11, t12 against the
-   real gate/dedupe/worker code, no Twitch). Load `behaviors/observe.js`, ACTIVATE,
-   START. Watch chat events arrive in history (t1, t2).
-7. Load `behaviors/ping.js`, ACTIVATE, enable `send` + `reply`, have someone type
-   `!ping` in chat (not the bot account). History should show
-   event → interpretation → proposal → ADMIT → action → result(is_sent=true) →
-   CONFIRMED in chat (t3, t5, t7, t8). Type `!ping` again within the repeat window
-   to watch a rejection (t6 live).
-8. Reload the page mid-run: it comes back STOPPED, nothing is resent (t9), and
-   executed keys are preserved.
+- Controller binds **127.0.0.1 only**; every call needs the ephemeral session key; foreign Origins and
+  rebinding Host headers are refused. `./exp0 doctor` checks that nothing answers on the LAN.
+- The Twitch user token lives **only in the controller's memory**; it is never written to disk, history or
+  browser storage. Re-authorize once after each controller start.
+- Never committed: tokens, client secrets, OpenAI keys, LM Studio credentials, the session key. The public
+  Client ID is fine (Twitch treats it as public).
+- LM Studio must stay localhost-only; the controller refuses a non-loopback LM Studio URL.
+- Authority: the operator on 127.0.0.1; the opponent only by **numeric Twitch user id**. Chat is input,
+  never authority. Posting in bigrigjay's chat is locked until his permission is recorded.
 
-Every step writes to the append-only history; export it as `.ndjson` from the
-machine page. "Why the hell did the bot say that?" is answered by following
-`proposal_id` / `event_id` through the lines.
+## Evidence
 
-## Operator controls (machine page)
+```sh
+pip install aiohttp playwright && python3 tests/e2e_v1.py
+```
 
-- **START / STOP** — whether the bot is running. Every page load starts STOPPED.
-- **E-STOP** — persistent; no external actions until explicitly cleared.
-- **observe / send / reply** — allowed action classes (`send` and `reply` lock
-  without a recorded streamer permission).
-- **ACTIVATE** — activates the source in the editor as `name@sha256[0:12]`;
-  a changed source is a new version. Nothing activates silently.
-- **limits** — min interval between sends, max sends per minute, repeat window.
-- **export / archive** — archive downloads the whole log and starts a new one;
-  `seq` numbering continues, nothing is edited.
-
-## Twitch surface used
-
-- Implicit grant: `https://id.twitch.tv/oauth2/authorize?response_type=token…`
-  ([docs](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/))
-- Validate (start, hourly, before reconnect): `GET https://id.twitch.tv/oauth2/validate`
-- Channel lookup: `GET https://api.twitch.tv/helix/users?login=…`
-- Chat input: EventSub WebSocket `wss://eventsub.wss.twitch.tv/ws`, subscription
-  `channel.chat.message` v1, condition `{broadcaster_user_id, user_id}`, user token
-  ([docs](https://dev.twitch.tv/docs/eventsub/handling-websocket-events/))
-- Chat output: `POST https://api.twitch.tv/helix/chat/messages`
-  `{broadcaster_id, sender_id, message, reply_parent_message_id?}` → `{message_id, is_sent, drop_reason}`
-  ([docs](https://dev.twitch.tv/docs/api/reference/#send-chat-message))
-- Revoke: `POST https://id.twitch.tv/oauth2/revoke`
-
-## Distribution notes
-
-- `raw.githack.com/…/main/…` serves the latest commit on `main` (changes appear
-  within minutes; heavy traffic extends cache). For a frozen build use
-  `rawcdn.githack.com/NFDFLDTHRY/EXP0/<commit-sha>/machine.html` (cached forever
-  per URL). The OAuth redirect URL must be the `setup.html` URL you actually open.
-- Everything served from `raw.githack.com` shares one browser origin: any other
-  githack page opened in the same browser profile can read `tim.*`, including the
-  token. Use a dedicated browser profile for the machine, and revoke the token
-  from the entry page when done.
-- Keep the machine tab in the foreground on the phone (or split-screen); Android
-  Chrome throttles background tabs. The keepalive watchdog reconnects after drops
-  and external actions stay refused until the connection is valid again.
-
-## Anti-cathedral
-
-One process (a browser tab). One append-only log (chunked `localStorage`, NDJSON).
-No server, no database, no framework. Add machinery only when reality demands it.
+Runs the real setup, lifecycle, controller and both pages against a fake Twitch on the real hostnames and
+writes `tests/.run/`. Last run: [`tests/EVIDENCE-e2e.txt`](tests/EVIDENCE-e2e.txt), 81 checks, 0 failed.
+Simulated Twitch proves EXP0's behavior, not Twitch's; the real gates are marked PENDING-REAL in GATES.md.

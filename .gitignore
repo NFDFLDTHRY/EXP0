@@ -1,0 +1,5 @@
+var/
+/exp0
+__pycache__/
+*.pyc
+tests/.run/
